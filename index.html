@@ -77,9 +77,31 @@
   content="width=device-width, initial-scale=1, maximum-scale=2.0, minimum-scale=1, user-scalable=no" />
 <title>Maruti Suzuki Safety First Asset Management Platform</title>
 <link rel="shortcut icon" type="image/x-icon" href="../../images/favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preconnect" href="https://code.jquery.com" />
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" />
 <link
   href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@300;400;500;600;700;800;900&amp;family=Roboto:wght@300;400;500;700;900&amp;display=swap"
   rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-beta.1/css/select2.min.css" />
+<style>
+  .logout-link {
+    color: #d9534f;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 5px 12px;
+    border: 1px solid #d9534f;
+    border-radius: 4px;
+    display: inline-block;
+    transition: background-color 0.3s, color 0.3s;
+  }
+
+  .logout-link:hover {
+    background-color: #d9534f;
+    color: #fff;
+  }
+</style>
 <div class="container wrapper">
   <div class="round_wrap">
     <!-- <div class="header">
@@ -109,7 +131,7 @@
 
             {% if user %}
             <li>
-              <a href="/Account/Login/LogOff?returnUrl=%2F" style="color: #d9534f; font-weight: 600; text-decoration: none; padding: 5px 12px; border: 1px solid #d9534f; border-radius: 4px; display: inline-block; transition: background-color 0.3s;" onmouseover="this.style.backgroundColor='#d9534f'; this.style.color='#fff';" onmouseout="this.style.backgroundColor='transparent'; this.style.color='#d9534f';">
+              <a href="/Account/Login/LogOff?returnUrl=%2F" class="logout-link">
                 Logout
               </a>
             </li>
@@ -1763,31 +1785,339 @@
   <div id="spinner">Please wait while we save your data...</div>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-beta.1/js/select2.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-beta.1/css/select2.min.css" />
+<script src="https://code.jquery.com/jquery-3.6.0.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-beta.1/js/select2.min.js" defer></script>
 <script>
+// ============================================================
+// UTILITY: Debounce
+// ============================================================
+function debounce(fn, delay) {
+    let timer;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
 
-  // new code - Hemant
-  document.addEventListener('DOMContentLoaded', function () {
-    var forms = document.querySelectorAll('form');
-    forms.forEach(function (form) {
-      form.addEventListener('submit', function (event) {
-        event.preventDefault(); 
-      });
+// ============================================================
+// UTILITY: Row counter for unique IDs in dynamic tables
+// ============================================================
+const rowCounters = {};
+function nextRowId(prefix) {
+    rowCounters[prefix] = (rowCounters[prefix] || 0) + 1;
+    return `${prefix}_${rowCounters[prefix]}`;
+}
+
+// ============================================================
+// STAFF ID VALIDATION
+// Debounced (500ms), cached — replaces 10 individual listeners
+// ============================================================
+const STAFF_VALIDATE_URL = "https://eadb1b2afd7145dc8d5a77e908bc0d.1b.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DPH5h7beyrdiMmL6e4KahaPzCSkc0n2KMAA6g6aVzIw";
+
+const staffIdCache = {};
+
+function validateStaffId(input) {
+    const staffId = input.value.trim();
+
+    // Don't fire for empty or very short values
+    if (!staffId || staffId.length < 3) return;
+
+    // Return cached result immediately
+    if (staffIdCache[staffId] !== undefined) {
+        if (!staffIdCache[staffId]) input.value = '';
+        return;
+    }
+
+    $.ajax({
+        url: STAFF_VALIDATE_URL,
+        method: "POST",
+        timeout: 10000,
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({ StaffID: staffId })
+    }).done(function (response) {
+        const dept = response[0];
+        const isValid = dept !== undefined && dept !== null && dept !== '';
+        staffIdCache[staffId] = isValid;
+        if (!isValid) input.value = '';
     });
-  });
-  // end
+}
 
-  $(document).ready(function () {
-    $("#shop").select2({
-      placeholder: "Select a department",
-      allowClear: true,
+const debouncedValidateStaffId = debounce(validateStaffId, 500);
+
+// Attach to all staff ID inputs — single place, easy to add more
+const STAFF_INPUT_NAMES = [
+    'Issuing_dpm',
+    'Reruiring_dpm',
+    'Issuing_person',
+    'Material-issuingstaffid',
+    'HOT-issuingstaffid',
+    'HEIGHT-issuingstaffid',
+    'CONFINED-issuingstaffid',
+    'Material-superstaffid',
+    'HOT-superstaffid',
+    'HEIGHT-superstaffid',
+    'Issuing_Safety_Coordinator',
+    'Requiring_Safety_Coordinator'
+];
+
+function attachStaffIdListeners() {
+    STAFF_INPUT_NAMES.forEach(name => {
+        const el = document.querySelector(`input[name="${name}"]`);
+        if (el) {
+            el.addEventListener('input', function () {
+                debouncedValidateStaffId(this);
+            });
+        }
+    });
+}
+
+// ============================================================
+// NUMERIC-ONLY VALIDATION (unchanged logic, consolidated)
+// ============================================================
+const NUMERIC_INPUT_NAMES = [
+    'Material-No-of-Persons-Engaged',
+    'HOT-No-of-Persons-Engaged',
+    'HEIGHT-No-of-Persons-Engaged',
+    'CONFINED-No-of-Persons-Engaged'
+];
+
+function validateNumericInput(input) {
+    if (!/^\d*$/.test(input.value)) {
+        input.value = '';
+    }
+}
+
+function attachNumericListeners() {
+    NUMERIC_INPUT_NAMES.forEach(name => {
+        const el = document.querySelector(`input[name="${name}"]`);
+        if (el) {
+            el.addEventListener('input', function () {
+                validateNumericInput(this);
+            });
+        }
+    });
+}
+
+// ============================================================
+// ADD NEW RECORD — consolidated factory
+// Each button declares its column spec once.
+// Unique IDs prevent data collection reading only row #1.
+// ============================================================
+
+/**
+ * @param {string} buttonId   - ID of the "Add New Record" anchor/button
+ * @param {string} tableId    - ID of the table to append rows to
+ * @param {Function} buildRow - fn(rowId: string) => HTML string for tr
+ * @param {string} removeClass - class of the remove button inside the row
+ */
+function setupAddRecord(buttonId, tableId, buildRow, removeClass) {
+    $(document).on('click', `#${buttonId}`, function () {
+        const rowId = nextRowId(tableId);
+        const rowHtml = buildRow(rowId);
+        $(`#${tableId} tbody`).append(rowHtml);
+    });
+
+    $(document).on('click', `.${removeClass}`, function () {
+        $(this).closest('tr').remove();
+    });
+}
+
+// ============================================================
+// Equipment table row builder (reused by records 1-4)
+// ============================================================
+function buildEquipmentRow(rowId, equipName, equipIdName, statusName, removeClass) {
+    return '<tr>' +
+        '<td><input type="text" class="' + equipName + '" id="' + equipName + '_' + rowId + '" value="" placeholder="Enter here"></td>' +
+        '<td><input type="text" class="' + equipIdName + '" id="' + equipIdName + '_' + rowId + '" value="" placeholder="Enter here"></td>' +
+        '<td>' +
+            '<select class="' + statusName + '" id="' + statusName + '_' + rowId + '">' +
+                '<option value="OK">OK</option>' +
+                '<option value="NG">NG</option>' +
+                '<option value="NA">NA</option>' +
+            '</select>' +
+            '<button class="remove-row ' + removeClass + '" type="button">+</button>' +
+        '</td>' +
+    '</tr>';
+}
+
+$(document).ready(function () {
+    $('form').on('submit', function (event) {
+        event.preventDefault();
+    });
+
+    // --------------------------------------------------------
+    // Select2 for department dropdown
+    // --------------------------------------------------------
+    $('#shop').select2({
+        placeholder: "Select a department",
+        allowClear: true,
     }).on('change', function () {
-      updateTable();
+        updateTable();
     });
-  });
 
+    // --------------------------------------------------------
+    // Record Table 1 — Material Equipment
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord1', 'recordTable1',
+        function(rowId) { return buildEquipmentRow(rowId, 'materialequipment', 'materialequipmentid', 'materialstatus', 'remove-t1'); },
+        'remove-t1'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 131 — Work Planned (Name + Staff ID)
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord131', 'recordTable131',
+        function(rowId) {
+            return '<tr>' +
+                '<td><input type="text" class="Name131" id="Name131_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td>' +
+                    '<input type="text" class="StaffID131" id="StaffID_' + rowId + '" value="" placeholder="Enter here">' +
+                    '<button class="remove-row remove-t131" type="button">+</button>' +
+                '</td>' +
+            '</tr>';
+        },
+        'remove-t131'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 2 — Hot Work Equipment
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord2', 'recordTable2',
+        function(rowId) { return buildEquipmentRow(rowId, 'materialequipment1', 'materialequipmentid1', 'materialstatus1', 'remove-t2'); },
+        'remove-t2'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 3 — Height Equipment
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord3', 'recordTable3',
+        function(rowId) { return buildEquipmentRow(rowId, 'materialequipment2', 'materialequipmentid2', 'materialstatus2', 'remove-t3'); },
+        'remove-t3'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 4 — Confined Equipment
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord4', 'recordTable4',
+        function(rowId) { return buildEquipmentRow(rowId, 'materialequipment3', 'materialequipmentid3', 'materialstatus3', 'remove-t4'); },
+        'remove-t4'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 5 — Gas Readings
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord5', 'recordTable5',
+        function(rowId) {
+            return '<tr>' +
+                '<td><input type="text" class="Oxygen" id="Oxygen_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="CO_2" id="CO_2_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="H2S" id="H2S_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="LEL" id="LEL_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="VOC" id="VOC_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="SO2" id="SO2_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td>' +
+                    '<input type="time" class="time_1" id="time_1_' + rowId + '" value="">' +
+                    '<button class="remove-row remove-t5" type="button">+</button>' +
+                '</td>' +
+            '</tr>';
+        },
+        'remove-t5'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 6 — Attendance
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord6', 'recordTable6',
+        function(rowId) {
+            return '<tr>' +
+                '<td><input type="text" class="Name_1" id="Name_1_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="Staff_No" id="Staff_No_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="time" class="Time_In" id="Time_In_' + rowId + '" value=""></td>' +
+                '<td><input type="text" class="Sign_in" id="Sign_in_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="time" class="Time_Out" id="Time_Out_' + rowId + '" value=""></td>' +
+                '<td>' +
+                    '<input type="text" class="Sign_Out" id="Sign_Out_' + rowId + '" value="" placeholder="Enter here">' +
+                    '<button class="remove-row remove-t6" type="button">+</button>' +
+                '</td>' +
+            '</tr>';
+        },
+        'remove-t6'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 7 — Identified Risks (with file upload)
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord7', 'recordTable7',
+        function(rowId) {
+            return '<tr>' +
+                '<td><input type="text" class="sysmar_firstname" id="sysmar_firstname_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="sysmar_surname" id="sysmar_surname_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td><input type="text" class="sysmar_dob" id="sysmar_dob_' + rowId + '" value="" placeholder="Enter here"></td>' +
+                '<td>' +
+                    '<input class="form-control1-file uploadimga" type="file" name="uploadimga_' + rowId + '" id="uploadimga_' + rowId + '" accept="image/*" capture="user">' +
+                    '<button class="remove-row remove-t7" type="button">+</button>' +
+                '</td>' +
+            '</tr>';
+        },
+        'remove-t7'
+    );
+
+    // --------------------------------------------------------
+    // Record Table 121 — Attendee list
+    // --------------------------------------------------------
+    setupAddRecord(
+        'addNewRecord121', 'recordTable121',
+        function(rowId) {
+            return '<tr>' +
+                '<td>' +
+                    '<input type="text" class="Attendee121" id="Attendee121_' + rowId + '" value="" placeholder="Enter here">' +
+                    '<button class="remove-row remove-t121" type="button">+</button>' +
+                '</td>' +
+            '</tr>';
+        },
+        'remove-t121'
+    );
+
+    // --------------------------------------------------------
+    // Attach all listeners
+    // --------------------------------------------------------
+    attachStaffIdListeners();
+    attachNumericListeners();
+});
+</script>
+<script>
+  // ============================================================
+  // IMAGE COMPRESSION
+  // Resize phone images client-side before base64 encoding.
+  // Cuts PATCH payload from ~40 MB down to ~5 MB.
+  // ============================================================
+  function compressImage(file, maxWidth = 1200, quality = 0.75) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = function () {
+        const ratio = Math.min(maxWidth / img.width, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1]);
+      };
+      img.onerror = () => resolve(null);
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  // ============================================================
+  // DATA — DPM assignments (server-side Liquid)
+  // ============================================================
   var SketchofEmergency;
 
   const DPMjsonString = `[{% for item in KYDPMAssign.results.entities %}
@@ -1885,58 +2215,109 @@
 
   function filterfun() {
     var permit = document.getElementById("PermitID_1");
+    var permitFrom = document.getElementById('permitfrom');
+    var permitTo = document.getElementById('permitto');
+    var permitCheckboxes = [
+      document.getElementById('checkbox1'),
+      document.getElementById('checkbox2'),
+      document.getElementById('checkbox3'),
+      document.getElementById('checkbox4')
+    ];
+    var contractorInputs = [
+      document.querySelector('input[name="Material-contname"]'),
+      document.querySelector('input[name="HOT-contname"]'),
+      document.querySelector('input[name="Height-contname"]')
+    ];
     const selectedItem = data12.find(item => item.PermitID === permit.value);
 
     if (selectedItem) {
       const permitFromDate = new Date(selectedItem.permitfrom);
       const permitToDate = new Date(selectedItem.Permitto);
-      document.getElementById('permitfrom').disabled = true;
-      document.getElementById('permitto').disabled = true;
-      document.getElementById('checkbox4').disabled = true;
-      document.getElementById('checkbox1').disabled = true;
-      document.getElementById('checkbox2').disabled = true;
-      document.getElementById('checkbox3').disabled = true;
-      document.getElementById('permitfrom').valueAsDate = permitFromDate;
-      document.getElementById('permitto').valueAsDate = permitToDate;
-      document.getElementById('checkbox1').checked = selectedItem.checkbox1 === 'true';
-      document.getElementById('checkbox2').checked = selectedItem.checkbox2 === 'true';
-      document.getElementById('checkbox3').checked = selectedItem.checkbox3 === 'true';
-      document.getElementById('checkbox4').checked = selectedItem.checkbox4 === 'true';
-      const selectElement2 = document.querySelector('input[name="Material-contname"]');
-      selectElement2.value = selectedItem.Contractor;
-      selectElement2.disabled = true;
-      const selectElement = document.querySelector('input[name="HOT-contname"]');
-      selectElement.value = selectedItem.Contractor;
-      selectElement.disabled = true;
-      const selectElement1 = document.querySelector('input[name="Height-contname"]');
-      selectElement1.value = selectedItem.Contractor;
-      selectElement1.disabled = true;
+      permitFrom.disabled = true;
+      permitTo.disabled = true;
+      permitFrom.valueAsDate = permitFromDate;
+      permitTo.valueAsDate = permitToDate;
+      permitCheckboxes[0].checked = selectedItem.checkbox1 === 'true';
+      permitCheckboxes[1].checked = selectedItem.checkbox2 === 'true';
+      permitCheckboxes[2].checked = selectedItem.checkbox3 === 'true';
+      permitCheckboxes[3].checked = selectedItem.checkbox4 === 'true';
+      permitCheckboxes.forEach(function (checkbox) {
+        checkbox.disabled = true;
+      });
+      contractorInputs.forEach(function (input) {
+        input.value = selectedItem.Contractor;
+        input.disabled = true;
+      });
     } else {
-      document.getElementById('permitfrom').disabled = false;
-      document.getElementById('permitto').disabled = false;
-      document.getElementById('checkbox4').disabled = false;
-      document.getElementById('checkbox1').disabled = false;
-      document.getElementById('checkbox2').disabled = false;
-      document.getElementById('checkbox3').disabled = false;
-      document.getElementById('checkbox1').checked = false;
-      document.getElementById('checkbox2').checked = false;
-      document.getElementById('checkbox3').checked = false;
-      document.getElementById('checkbox4').checked = false;
-      const selectElement2 = document.querySelector('input[name="Material-contname"]');
-      selectElement2.value = "";
-      selectElement2.disabled = false;
-      const selectElement = document.querySelector('input[name="HOT-contname"]');
-      selectElement.value = "";
-      selectElement.disabled = false;
-      const selectElement1 = document.querySelector('input[name="Height-contname"]');
-      selectElement1.value = "";
-      selectElement1.disabled = false;
-
+      permitFrom.disabled = false;
+      permitTo.disabled = false;
+      permitCheckboxes.forEach(function (checkbox) {
+        checkbox.disabled = false;
+        checkbox.checked = false;
+      });
+      contractorInputs.forEach(function (input) {
+        input.value = "";
+        input.disabled = false;
+      });
     }
 
   }
 
 
+  // ============================================================
+  // RADIO TOGGLE — data-driven, replaces 12 copy-pasted functions
+  // Radio221() … Radio2212() are all gone; one function handles all.
+  // ============================================================
+  const radioSectionConfig = {
+    '221': { checkboxes: ['221where1','221what1','221what2','221what3'],                                                                                                  imageIndex: 3,  uploadId: 'uploadimg1'  },
+    '222': { checkboxes: ['222where1','222where2','222where3','222where4','222what1','222what2','222what3','222what4','222what5','222what6'],                             imageIndex: 4,  uploadId: 'uploadimg2'  },
+    '223': { checkboxes: ['223where1','223where2','223what1','223what2','223what3'],                                                                                      imageIndex: 5,  uploadId: 'uploadimg3'  },
+    '224': { checkboxes: ['224where1','224where2','224where3','224where4','224what1','224what2','224what3','224what4'],                                                   imageIndex: 6,  uploadId: 'uploadimg4'  },
+    '225': { checkboxes: ['225where1','225where2','225where3','225where4','225what1','225what2','225what3'],                                                              imageIndex: 7,  uploadId: 'uploadimg5'  },
+    '226': { checkboxes: ['226where1','226where2','226where3','226what1','226what2','226what3'],                                                                          imageIndex: 8,  uploadId: 'uploadimg6'  },
+    '227': { checkboxes: ['227where1','227where2','227what1','227what2','227what3','227what4','227what5'],                                                                imageIndex: 9,  uploadId: 'uploadimg7'  },
+    '228': { checkboxes: ['228where1','228where2','228where3','228where4','228what1','228what2','228what3','228what4'],                                                   imageIndex: 10, uploadId: 'uploadimg8'  },
+    '229': { checkboxes: ['229where1','229where2','229where3','229what1','229what2','229what3','229what4'],                                                               imageIndex: 11, uploadId: 'uploadimg9'  },
+    '2210':{ checkboxes: ['2210where1','2210where2','2210where3','2210where4','2210where5','2210what1','2210what2'],                                                      imageIndex: 12, uploadId: 'uploadimg10' },
+    '2211':{ checkboxes: ['2211where1','2211where2','2211what1','2211what2','2211what3','2211what4'],                                                                     imageIndex: 13, uploadId: 'uploadimg11' },
+    '2212':{ checkboxes: ['2212where1','2212where2','2212what1','2212what2','2212what3'],                                                                                 imageIndex: 14, uploadId: 'uploadimg12' }
+  };
+
+  function handleRadioToggle(sectionId) {
+    const config = radioSectionConfig[sectionId];
+    if (!config) return;
+    const radio = document.querySelector(`input[name="${sectionId}q"]:checked`);
+    const isYes = radio && radio.value === 'Yes';
+    const sectionEl = document.getElementById(sectionId);
+    if (sectionEl) sectionEl.style.display = isYes ? 'block' : 'none';
+    if (!isYes) {
+      config.checkboxes.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+      });
+      imageDataArray[config.imageIndex] = null;
+      const uploadEl = document.getElementById(config.uploadId);
+      if (uploadEl) uploadEl.value = '';
+    }
+  }
+
+  // Shim the old function names so existing onchange="Radio221()" HTML still works
+  function Radio221()  { handleRadioToggle('221');  }
+  function Radio222()  { handleRadioToggle('222');  }
+  function Radio223()  { handleRadioToggle('223');  }
+  function Radio224()  { handleRadioToggle('224');  }
+  function Radio225()  { handleRadioToggle('225');  }
+  function Radio226()  { handleRadioToggle('226');  }
+  function Radio227()  { handleRadioToggle('227');  }
+  function Radio228()  { handleRadioToggle('228');  }
+  function Radio229()  { handleRadioToggle('229');  }
+  function Radio2210() { handleRadioToggle('2210'); }
+  function Radio2211() { handleRadioToggle('2211'); }
+  function Radio2212() { handleRadioToggle('2212'); }
+
+  // ============================================================
+  // QUESTIONS DATA
+  // ============================================================
   const jsonString = `[{% for item in Questions.results.entities %}
     {
     "uid":"{{item.sysmar_kyquestionsid}}",
@@ -1953,11 +2334,7 @@
 
   const data = JSON.parse(`{ "items": ${jsonString} }`).items;
 
-  const filteredData = data.filter(item => {
-    return item.checksheetname.includes("Material Lifting & Handling_1") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  filteredData.sort((a, b) => {
+  function byQuestionNumber(a, b) {
     const qnumA = parseInt(a.Qnumber);
     const qnumB = parseInt(b.Qnumber);
 
@@ -1968,13 +2345,43 @@
       return 1;
     }
     return 0;
-  });
+  }
 
+  function validateQuestionDate(event) {
+    var selectedDate = new Date(event.target.value);
+    var currentDate = new Date();
+    var maxDate = new Date();
+    var fromdate = document.getElementById("permitfrom");
+    var todate = document.getElementById("permitto");
+    var fromDateValue = new Date(fromdate.value);
+    var toDateValue = new Date(todate.value);
 
-  function populateQuestions() {
-    var container = document.querySelector("#step2 .grid");
+    maxDate.setDate(currentDate.getDate() + 2);
+    selectedDate.setHours(0, 0, 0, 0);
+    currentDate.setHours(0, 0, 0, 0);
+    maxDate.setHours(0, 0, 0, 0);
+    fromDateValue.setHours(0, 0, 0, 0);
+    toDateValue.setHours(0, 0, 0, 0);
 
-    filteredData.forEach(function (question) {
+    if (selectedDate < currentDate) {
+      event.target.value = '';
+      document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
+      showPopup();
+    } else if (selectedDate > maxDate) {
+      event.target.value = '';
+      document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
+      showPopup();
+    } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
+      event.target.value = '';
+      document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
+      showPopup();
+    }
+  }
+
+  function renderQuestions(containerSelector, questions) {
+    var container = document.querySelector(containerSelector);
+
+    questions.forEach(function (question) {
       var divColSpan3 = document.createElement("div");
       divColSpan3.classList.add("col-span-3");
 
@@ -1986,1617 +2393,208 @@
       label.classList.add("form-control1-label");
       label.textContent = question.Question;
 
+      var control;
       if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
+        control = document.createElement("select");
+        control.name = question.options;
+        control.id = question.uid;
+        control.classList.add("form-control1-select");
 
         var options = question.options.split(",");
         options.forEach(function (option) {
           var optionElement = document.createElement("option");
           optionElement.value = option;
           optionElement.textContent = option;
-          select.appendChild(optionElement);
+          control.appendChild(optionElement);
         });
+      } else if (question.qtypelabel === "Text" || question.qtypelabel === "Date" || question.qtypelabel === "Time") {
+        control = document.createElement("input");
+        control.type = question.qtypelabel.toLowerCase();
+        control.name = question.options;
+        control.id = question.uid;
+        control.required = true;
+        control.classList.add("form-control1-input");
 
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
+        if (question.qtypelabel === "Date") {
+          control.addEventListener('change', validateQuestionDate);
+        }
       }
 
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
-    });
-  }
-  populateQuestions();
-
-  const cranetext = data.filter(item => {
-    return item.checksheetname.includes("Crane_1") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  cranetext.sort((a, b) => {
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-
-  function populateQuestions1() {
-    var container = document.querySelector("#step5 .grid");
-
-    cranetext.forEach(function (question) {
-      var divColSpan3 = document.createElement("div");
-      divColSpan3.classList.add("col-span-3");
-
-      var divFormControl = document.createElement("div");
-      divFormControl.classList.add("form-control1");
-
-      var label = document.createElement("label");
-      label.htmlFor = question.uid;
-      label.classList.add("form-control1-label");
-      label.textContent = question.Question;
-
-      if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
-
-        var options = question.options.split(",");
-        options.forEach(function (option) {
-          var optionElement = document.createElement("option");
-          optionElement.value = option;
-          optionElement.textContent = option;
-          select.appendChild(optionElement);
-        });
-
+      if (control) {
         divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
+        divFormControl.appendChild(control);
+        divColSpan3.appendChild(divFormControl);
+        container.appendChild(divColSpan3);
       }
-
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
     });
   }
 
-  populateQuestions1();
-
-  const Forklifttext = data.filter(item => {
-    return item.checksheetname.includes("Forklift_1") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  Forklifttext.sort((a, b) => {
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-
-  function populateQuestions2() {
-    var container = document.querySelector("#step7 .grid");
-
-    Forklifttext.forEach(function (question) {
-      var divColSpan3 = document.createElement("div");
-      divColSpan3.classList.add("col-span-3");
-
-      var divFormControl = document.createElement("div");
-      divFormControl.classList.add("form-control1");
-
-      var label = document.createElement("label");
-      label.htmlFor = question.uid;
-      label.classList.add("form-control1-label");
-      label.textContent = question.Question;
-
-      if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
-
-        var options = question.options.split(",");
-        options.forEach(function (option) {
-          var optionElement = document.createElement("option");
-          optionElement.value = option;
-          optionElement.textContent = option;
-          select.appendChild(optionElement);
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      }
-
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
-    });
+  function questionGroup(checksheetName, excludedTypes) {
+    return data.filter(item => {
+      return item.checksheetname.includes(checksheetName) && !excludedTypes.some(type => item.qtype.includes(type));
+    }).sort(byQuestionNumber);
   }
 
-  populateQuestions2();
-
-
-  const Hottext = data.filter(item => {
-    return item.checksheetname.includes("Hot & Height & Confined_1") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  Hottext.sort((a, b) => {
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-
-  function populateQuestions3() {
-    var container = document.querySelector("#step9 .grid");
-
-    Hottext.forEach(function (question) {
-      var divColSpan3 = document.createElement("div");
-      divColSpan3.classList.add("col-span-3");
-
-      var divFormControl = document.createElement("div");
-      divFormControl.classList.add("form-control1");
-
-      var label = document.createElement("label");
-      label.htmlFor = question.uid;
-      label.classList.add("form-control1-label");
-      label.textContent = question.Question;
-
-      if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
-
-        var options = question.options.split(",");
-        options.forEach(function (option) {
-          var optionElement = document.createElement("option");
-          optionElement.value = option;
-          optionElement.textContent = option;
-          select.appendChild(optionElement);
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      }
-
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
-    });
-  }
-
-  populateQuestions3();
-
-
-  const Heighttext = data.filter(item => {
-    return item.checksheetname.includes("Height/Civil/Excavation_1") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  Heighttext.sort((a, b) => {
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-
-  function populateQuestions4() {
-    var container = document.querySelector("#step12 .grid");
-
-    Heighttext.forEach(function (question) {
-      var divColSpan3 = document.createElement("div");
-      divColSpan3.classList.add("col-span-3");
-
-      var divFormControl = document.createElement("div");
-      divFormControl.classList.add("form-control1");
-
-      var label = document.createElement("label");
-      label.htmlFor = question.uid;
-      label.classList.add("form-control1-label");
-      label.textContent = question.Question;
-
-      if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
-
-        var options = question.options.split(",");
-        options.forEach(function (option) {
-          var optionElement = document.createElement("option");
-          optionElement.value = option;
-          optionElement.textContent = option;
-          select.appendChild(optionElement);
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      }
-
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
-    });
-  }
-
-  populateQuestions4();
-
-
-  const Annexuretext = data.filter(item => {
-    return item.checksheetname.includes("Annexure_1") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  Annexuretext.sort((a, b) => {
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-
-  function populateQuestions5() {
-    var container = document.querySelector("#step16 .grid");
-
-    Annexuretext.forEach(function (question) {
-      var divColSpan3 = document.createElement("div");
-      divColSpan3.classList.add("col-span-3");
-
-      var divFormControl = document.createElement("div");
-      divFormControl.classList.add("form-control1");
-
-      var label = document.createElement("label");
-      label.htmlFor = question.uid;
-      label.classList.add("form-control1-label");
-      label.textContent = question.Question;
-
-      if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
-
-        var options = question.options.split(",");
-        options.forEach(function (option) {
-          var optionElement = document.createElement("option");
-          optionElement.value = option;
-          optionElement.textContent = option;
-          select.appendChild(optionElement);
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      }
-
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
-    });
-  }
-
-  populateQuestions5();
-
-  const Annexuretext1 = data.filter(item => {
-    return item.checksheetname.includes("Annexure_2") && !item.qtype.includes("300290002") && !item.qtype.includes("300290003")
-  });
-
-  Annexuretext1.sort((a, b) => {
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-
-  function populateQuestions6() {
-    var container = document.querySelector("#step18 .grid");
-
-    Annexuretext1.forEach(function (question) {
-      var divColSpan3 = document.createElement("div");
-      divColSpan3.classList.add("col-span-3");
-
-      var divFormControl = document.createElement("div");
-      divFormControl.classList.add("form-control1");
-
-      var label = document.createElement("label");
-      label.htmlFor = question.uid;
-      label.classList.add("form-control1-label");
-      label.textContent = question.Question;
-
-      if (question.qtypelabel === "Choice") {
-        var select = document.createElement("select");
-        select.name = question.options;
-        select.id = question.uid;
-        select.classList.add("form-control1-select");
-
-        var options = question.options.split(",");
-        options.forEach(function (option) {
-          var optionElement = document.createElement("option");
-          optionElement.value = option;
-          optionElement.textContent = option;
-          select.appendChild(optionElement);
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(select);
-      } else if (question.qtypelabel === "Text") {
-        var input = document.createElement("input");
-        input.type = "text";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Date") {
-        var input = document.createElement("input");
-        input.type = "date";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        input.addEventListener('change', function (event) {
-          var selectedDate = new Date(event.target.value);
-          var currentDate = new Date();
-          var maxDate = new Date();
-          var fromdate = document.getElementById("permitfrom");
-          var todate = document.getElementById("permitto");
-          var fromDateValue = new Date(fromdate.value);
-          var toDateValue = new Date(todate.value);
-
-          maxDate.setDate(currentDate.getDate() + 2);
-          selectedDate.setHours(0, 0, 0, 0);
-          currentDate.setHours(0, 0, 0, 0);
-          maxDate.setHours(0, 0, 0, 0);
-          fromDateValue.setHours(0, 0, 0, 0);
-          toDateValue.setHours(0, 0, 0, 0);
-
-          if (selectedDate < currentDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Select either the current date or tomorrow date.';
-            showPopup();
-          } else if (selectedDate > maxDate) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Please select a date within the next two days.';
-            showPopup();
-          } else if (selectedDate < fromDateValue || selectedDate > toDateValue) {
-            event.target.value = '';
-            document.getElementById('popupMessage').innerText = 'Selected date should be between permit is valid from and permit is valid till.';
-            showPopup();
-          }
-        });
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      } else if (question.qtypelabel === "Time") {
-        var input = document.createElement("input");
-        input.type = "time";
-        input.name = question.options;
-        input.id = question.uid;
-        input.required = true;
-        input.classList.add("form-control1-input");
-
-        divFormControl.appendChild(label);
-        divFormControl.appendChild(input);
-      }
-
-      divColSpan3.appendChild(divFormControl);
-      container.appendChild(divColSpan3);
-    });
-  }
-
-  populateQuestions6();
-
-
-  var extension = "_NG";
+  const formQuestionTypes    = ["300290002", "300290003"];
+  const checklistExcludedTypes = ["300290000", "300290001", "300290004", "300290005"];
+  var extension  = "_NG";
   var extension2 = "_NA";
 
-  const materialchecklist = data.filter(item => {
-    return item.checksheetname.includes("Material Lifting & Handling_1") && !item.qtype.includes("300290000") && !item.qtype.includes("300290001") && !item.qtype.includes("300290004") && !item.qtype.includes("300290005")
-  });
+  // ============================================================
+  // LAZY STEP RENDERING
+  // Question groups / checklists are computed once on first visit.
+  // Users on a single checksheet path skip rendering all others.
+  // ============================================================
 
-  materialchecklist.sort((a, b) => {
-    // Convert Qnumber to numbers before comparison
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    // Compare Qnumber values
-    if (qnumA < qnumB) {
-      return -1;
+  // Lazily computed question datasets — populated on first render
+  const _qdata = {};
+  function getQData(key) {
+    if (!_qdata[key]) {
+      switch (key) {
+        case 'filteredData':    _qdata[key] = questionGroup("Material Lifting & Handling_1", formQuestionTypes);    break;
+        case 'cranetext':       _qdata[key] = questionGroup("Crane_1", formQuestionTypes);                          break;
+        case 'Forklifttext':    _qdata[key] = questionGroup("Forklift_1", formQuestionTypes);                       break;
+        case 'Hottext':         _qdata[key] = questionGroup("Hot & Height & Confined_1", formQuestionTypes);        break;
+        case 'Heighttext':      _qdata[key] = questionGroup("Height/Civil/Excavation_1", formQuestionTypes);        break;
+        case 'Annexuretext':    _qdata[key] = questionGroup("Annexure_1", formQuestionTypes);                       break;
+        case 'Annexuretext1':   _qdata[key] = questionGroup("Annexure_2", formQuestionTypes);                       break;
+        case 'materialchecklist':   _qdata[key] = questionGroup("Material Lifting & Handling_1", checklistExcludedTypes); break;
+        case 'cranechecksheet':     _qdata[key] = questionGroup("Crane_1", checklistExcludedTypes);                       break;
+        case 'Forkliftchecksheet':  _qdata[key] = questionGroup("Forklift_1", checklistExcludedTypes);                   break;
+        case 'Hotchecksheet':       _qdata[key] = questionGroup("Hot & Height & Confined_1", checklistExcludedTypes);    break;
+        case 'Heightchecksheet':    _qdata[key] = questionGroup("Height/Civil/Excavation_1", checklistExcludedTypes);    break;
+        case 'Confinedchecksheet':  _qdata[key] = questionGroup("Confined Space_1", checklistExcludedTypes);             break;
+      }
     }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-  const tableBody = document.getElementById('dynamic-table');
-
-  tableBody.innerHTML = '';
-
-  materialchecklist.forEach(item => {
-    const row = document.createElement('tr');
-
-    const qNumberCell = document.createElement('td');
-    qNumberCell.textContent = item.Qnumber;
-    row.appendChild(qNumberCell);
-
-    const questionCell = document.createElement('td');
-    const questionParagraph = document.createElement('p');
-    questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
-    questionCell.appendChild(questionParagraph);
-    row.appendChild(questionCell);
-
-
-    if (item.qtype === '300290003') {
-      const textInputCell = document.createElement('td');
-      textInputCell.colSpan = 2;
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.name = `${item.uid}_text`;
-      textInput.id = `${item.uid}_text`;
-      textInput.placeholder = 'Enter text';
-      textInput.className = 'form-control1-input';
-      textInputCell.appendChild(textInput);
-      row.appendChild(textInputCell);
-    } else {
-      const doneCell = document.createElement('td');
-      const doneCheckboxSpan = document.createElement('span');
-      doneCheckboxSpan.className = 'custom-checkbox';
-      doneCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid}" class="custom-checkbox-input" /><label for="${item.uid}" class="custom-checkbox-label">Done</label>`;
-      doneCell.appendChild(doneCheckboxSpan);
-      row.appendChild(doneCell);
-
-      const naCell = document.createElement('td');
-      const naCheckboxSpan = document.createElement('span');
-      naCheckboxSpan.className = 'custom-checkbox';
-      naCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension2}" class="custom-checkbox-input" /><label for="${item.uid + extension2}" class="custom-checkbox-label">N/A</label>`;
-      naCell.appendChild(naCheckboxSpan);
-      row.appendChild(naCell);
-    }
-
-    tableBody.appendChild(row);
-  });
-
-  const cranechecksheet = data.filter(item => {
-    return item.checksheetname.includes("Crane_1") && !item.qtype.includes("300290000") && !item.qtype.includes("300290001") && !item.qtype.includes("300290004") && !item.qtype.includes("300290005")
-  });
-
-  cranechecksheet.sort((a, b) => {
-    // Convert Qnumber to numbers before comparison
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    // Compare Qnumber values
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-  const tableBody1 = document.getElementById('dynamic-table1');
-
-  tableBody1.innerHTML = '';
-
-  cranechecksheet.forEach(item => {
-    const row = document.createElement('tr');
-
-    const qNumberCell = document.createElement('td');
-    qNumberCell.textContent = item.Qnumber;
-    row.appendChild(qNumberCell);
-
-    const questionCell = document.createElement('td');
-    const questionParagraph = document.createElement('p');
-    questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
-    questionCell.appendChild(questionParagraph);
-    row.appendChild(questionCell);
-
-
-    if (item.qtype === '300290003') {
-      const textInputCell = document.createElement('td');
-      textInputCell.colSpan = 2;
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.name = `${item.uid}_text`;
-      textInput.id = `${item.uid}_text`;
-      textInput.placeholder = 'Enter text';
-      textInput.className = 'form-control1-input';
-      textInputCell.appendChild(textInput);
-      row.appendChild(textInputCell);
-    } else {
-      const doneCell = document.createElement('td');
-      const doneCheckboxSpan = document.createElement('span');
-      doneCheckboxSpan.className = 'custom-checkbox';
-      doneCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid}" class="custom-checkbox-input" /><label for="${item.uid}" class="custom-checkbox-label">Done</label>`;
-      doneCell.appendChild(doneCheckboxSpan);
-      row.appendChild(doneCell);
-
-      const ngCell = document.createElement('td');
-      const ngCheckboxSpan = document.createElement('span');
-      ngCheckboxSpan.className = 'custom-checkbox';
-      ngCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension}" class="custom-checkbox-input" /><label for="${item.uid + extension}" class="custom-checkbox-label">NG</label>`;
-      ngCell.appendChild(ngCheckboxSpan);
-      row.appendChild(ngCell);
-
-      const naCell = document.createElement('td');
-      const naCheckboxSpan = document.createElement('span');
-      naCheckboxSpan.className = 'custom-checkbox';
-      naCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension2}" class="custom-checkbox-input" /><label for="${item.uid + extension2}" class="custom-checkbox-label">NA</label>`;
-      naCell.appendChild(naCheckboxSpan);
-      row.appendChild(naCell);
-    }
-
-    tableBody1.appendChild(row);
-
-    const remarksRow = document.createElement('tr');
-
-    const remarksLabelCell = document.createElement('td');
-    remarksLabelCell.textContent = 'Remarks:';
-    remarksRow.appendChild(remarksLabelCell);
-
-    const remarksCell = document.createElement('td');
-    remarksCell.colSpan = 4;
-
-    const remarksDiv = document.createElement('div');
-    remarksDiv.className = 'col-span-3';
-
-    const formControlDiv = document.createElement('div');
-    formControlDiv.className = 'form-control1';
-
-    const remarksInput = document.createElement('input');
-    remarksInput.type = 'text';
-    remarksInput.name = `${item.uid}_remarks`;
-    remarksInput.placeholder = 'Enter remarks';
-    remarksInput.id = `${item.uid}_remarks`;
-    remarksInput.className = 'form-control1-input';
-
-    formControlDiv.appendChild(remarksInput);
-    remarksDiv.appendChild(formControlDiv);
-    remarksCell.appendChild(remarksDiv);
-    remarksRow.appendChild(remarksCell);
-
-    tableBody1.appendChild(remarksRow);
-  });
-
-  const Forkliftchecksheet = data.filter(item => {
-    return item.checksheetname.includes("Forklift_1") && !item.qtype.includes("300290000") && !item.qtype.includes("300290001") && !item.qtype.includes("300290004") && !item.qtype.includes("300290005")
-  });
-
-  Forkliftchecksheet.sort((a, b) => {
-    // Convert Qnumber to numbers before comparison
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    // Compare Qnumber values
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-  const tableBody2 = document.getElementById('dynamic-table2');
-
-  tableBody2.innerHTML = '';
-
-  Forkliftchecksheet.forEach(item => {
-    const row = document.createElement('tr');
-
-    const qNumberCell = document.createElement('td');
-    qNumberCell.textContent = item.Qnumber;
-    row.appendChild(qNumberCell);
-
-    const questionCell = document.createElement('td');
-    const questionParagraph = document.createElement('p');
-    questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
-    questionCell.appendChild(questionParagraph);
-    row.appendChild(questionCell);
-
-
-    if (item.qtype === '300290003') {
-      const textInputCell = document.createElement('td');
-      textInputCell.colSpan = 2;
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.name = `${item.uid}_text`;
-      textInput.id = `${item.uid}_text`;
-      textInput.placeholder = 'Enter text';
-      textInput.className = 'form-control1-input';
-      textInputCell.appendChild(textInput);
-      row.appendChild(textInputCell);
-    } else {
-      const doneCell = document.createElement('td');
-      const doneCheckboxSpan = document.createElement('span');
-      doneCheckboxSpan.className = 'custom-checkbox';
-      doneCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid}" class="custom-checkbox-input" /><label for="${item.uid}" class="custom-checkbox-label">Done</label>`;
-      doneCell.appendChild(doneCheckboxSpan);
-      row.appendChild(doneCell);
-
-      const ngCell = document.createElement('td');
-      const ngCheckboxSpan = document.createElement('span');
-      ngCheckboxSpan.className = 'custom-checkbox';
-      ngCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension}" class="custom-checkbox-input" /><label for="${item.uid + extension}" class="custom-checkbox-label">NG</label>`;
-      ngCell.appendChild(ngCheckboxSpan);
-      row.appendChild(ngCell);
-
-      const naCell = document.createElement('td');
-      const naCheckboxSpan = document.createElement('span');
-      naCheckboxSpan.className = 'custom-checkbox';
-      naCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension2}" class="custom-checkbox-input" /><label for="${item.uid + extension2}" class="custom-checkbox-label">NA</label>`;
-      naCell.appendChild(naCheckboxSpan);
-      row.appendChild(naCell);
-    }
-
-    tableBody2.appendChild(row);
-
-    const remarksRow = document.createElement('tr');
-
-    const remarksLabelCell = document.createElement('td');
-    remarksLabelCell.textContent = 'Remarks:';
-    remarksRow.appendChild(remarksLabelCell);
-
-    const remarksCell = document.createElement('td');
-    remarksCell.colSpan = 4;
-
-    const remarksDiv = document.createElement('div');
-    remarksDiv.className = 'col-span-3';
-
-    const formControlDiv = document.createElement('div');
-    formControlDiv.className = 'form-control1';
-
-    const remarksInput = document.createElement('input');
-    remarksInput.type = 'text';
-    remarksInput.name = `${item.uid}_remarks`;
-    remarksInput.placeholder = 'Enter remarks';
-    remarksInput.id = `${item.uid}_remarks`;
-    remarksInput.className = 'form-control1-input';
-
-    formControlDiv.appendChild(remarksInput);
-    remarksDiv.appendChild(formControlDiv);
-    remarksCell.appendChild(remarksDiv);
-    remarksRow.appendChild(remarksCell);
-
-    tableBody2.appendChild(remarksRow);
-  });
-
-  const Hotchecksheet = data.filter(item => {
-    return item.checksheetname.includes("Hot & Height & Confined_1") && !item.qtype.includes("300290000") && !item.qtype.includes("300290001") && !item.qtype.includes("300290004") && !item.qtype.includes("300290005")
-  });
-
-  Hotchecksheet.sort((a, b) => {
-    // Convert Qnumber to numbers before comparison
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    // Compare Qnumber values
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-  const tableBody3 = document.getElementById('dynamic-table3');
-
-  tableBody3.innerHTML = '';
-
-  Hotchecksheet.forEach(item => {
-    const row = document.createElement('tr');
-
-    const qNumberCell = document.createElement('td');
-    qNumberCell.textContent = item.Qnumber;
-    row.appendChild(qNumberCell);
-
-    const questionCell = document.createElement('td');
-    const questionParagraph = document.createElement('p');
-    questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
-    questionCell.appendChild(questionParagraph);
-    row.appendChild(questionCell);
-
-
-    if (item.qtype === '300290003') {
-      const textInputCell = document.createElement('td');
-      textInputCell.colSpan = 2;
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.name = `${item.uid}_text`;
-      textInput.id = `${item.uid}_text`;
-      textInput.placeholder = 'Enter text';
-      textInput.className = 'form-control1-input';
-      textInputCell.appendChild(textInput);
-      row.appendChild(textInputCell);
-    } else {
-      const doneCell = document.createElement('td');
-      const doneCheckboxSpan = document.createElement('span');
-      doneCheckboxSpan.className = 'custom-checkbox';
-      doneCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid}" class="custom-checkbox-input" /><label for="${item.uid}" class="custom-checkbox-label">Done</label>`;
-      doneCell.appendChild(doneCheckboxSpan);
-      row.appendChild(doneCell);
-
-      const naCell = document.createElement('td');
-      const naCheckboxSpan = document.createElement('span');
-      naCheckboxSpan.className = 'custom-checkbox';
-      naCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension2}" class="custom-checkbox-input" /><label for="${item.uid + extension2}" class="custom-checkbox-label">NA</label>`;
-      naCell.appendChild(naCheckboxSpan);
-      row.appendChild(naCell);
-    }
-
-    tableBody3.appendChild(row);
-  });
-
-
-  const Heightchecksheet = data.filter(item => {
-    return item.checksheetname.includes("Height/Civil/Excavation_1") && !item.qtype.includes("300290000") && !item.qtype.includes("300290001") && !item.qtype.includes("300290004") && !item.qtype.includes("300290005")
-  });
-
-  Heightchecksheet.sort((a, b) => {
-    // Convert Qnumber to numbers before comparison
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    // Compare Qnumber values
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-  const tableBody4 = document.getElementById('dynamic-table4');
-
-  tableBody4.innerHTML = '';
-
-  Heightchecksheet.forEach(item => {
-    const row = document.createElement('tr');
-
-    const qNumberCell = document.createElement('td');
-    qNumberCell.textContent = item.Qnumber;
-    row.appendChild(qNumberCell);
-
-    const questionCell = document.createElement('td');
-    const questionParagraph = document.createElement('p');
-    questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
-    questionCell.appendChild(questionParagraph);
-    row.appendChild(questionCell);
-
-
-    if (item.qtype === '300290003') {
-      const textInputCell = document.createElement('td');
-      textInputCell.colSpan = 2;
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.name = `${item.uid}_text`;
-      textInput.id = `${item.uid}_text`;
-      textInput.placeholder = 'Enter text';
-      textInput.className = 'form-control1-input';
-      textInputCell.appendChild(textInput);
-      row.appendChild(textInputCell);
-    } else {
-      const doneCell = document.createElement('td');
-      const doneCheckboxSpan = document.createElement('span');
-      doneCheckboxSpan.className = 'custom-checkbox';
-      doneCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid}" class="custom-checkbox-input" /><label for="${item.uid}" class="custom-checkbox-label">Done</label>`;
-      doneCell.appendChild(doneCheckboxSpan);
-      row.appendChild(doneCell);
-
-      const naCell = document.createElement('td');
-      const naCheckboxSpan = document.createElement('span');
-      naCheckboxSpan.className = 'custom-checkbox';
-      naCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension2}" class="custom-checkbox-input" /><label for="${item.uid + extension2}" class="custom-checkbox-label">NA</label>`;
-      naCell.appendChild(naCheckboxSpan);
-      row.appendChild(naCell);
-    }
-
-    tableBody4.appendChild(row);
-  });
-
-
-  const Confinedchecksheet = data.filter(item => {
-    return item.checksheetname.includes("Confined Space_1") && !item.qtype.includes("300290000") && !item.qtype.includes("300290001") && !item.qtype.includes("300290004") && !item.qtype.includes("300290005")
-  });
-
-  Confinedchecksheet.sort((a, b) => {
-    // Convert Qnumber to numbers before comparison
-    const qnumA = parseInt(a.Qnumber);
-    const qnumB = parseInt(b.Qnumber);
-
-    // Compare Qnumber values
-    if (qnumA < qnumB) {
-      return -1;
-    }
-    if (qnumA > qnumB) {
-      return 1;
-    }
-    return 0;
-  });
-
-  const tableBody5 = document.getElementById('dynamic-table5');
-
-  tableBody5.innerHTML = '';
-
-  Confinedchecksheet.forEach(item => {
-    const row = document.createElement('tr');
-
-    const qNumberCell = document.createElement('td');
-    qNumberCell.textContent = item.Qnumber;
-    row.appendChild(qNumberCell);
-
-    const questionCell = document.createElement('td');
-    const questionParagraph = document.createElement('p');
-    questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
-    questionCell.appendChild(questionParagraph);
-    row.appendChild(questionCell);
-
-
-    if (item.qtype === '300290003') {
-      const textInputCell = document.createElement('td');
-      textInputCell.colSpan = 2;
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.name = `${item.uid}_text`;
-      textInput.id = `${item.uid}_text`;
-      textInput.placeholder = 'Enter text';
-      textInput.className = 'form-control1-input';
-      textInputCell.appendChild(textInput);
-      row.appendChild(textInputCell);
-    } else {
-      const doneCell = document.createElement('td');
-      const doneCheckboxSpan = document.createElement('span');
-      doneCheckboxSpan.className = 'custom-checkbox';
-      doneCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid}" class="custom-checkbox-input" /><label for="${item.uid}" class="custom-checkbox-label">Yes</label>`;
-      doneCell.appendChild(doneCheckboxSpan);
-      row.appendChild(doneCell);
-
-      const naCell = document.createElement('td');
-      const naCheckboxSpan = document.createElement('span');
-      naCheckboxSpan.className = 'custom-checkbox';
-      naCheckboxSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${item.uid + extension2}" class="custom-checkbox-input" /><label for="${item.uid + extension2}" class="custom-checkbox-label">No</label>`;
-      naCell.appendChild(naCheckboxSpan);
-      row.appendChild(naCell);
-    }
-
-    tableBody5.appendChild(row);
-
-    const remarksRow = document.createElement('tr');
-
-    const remarksLabelCell = document.createElement('td');
-    remarksLabelCell.textContent = 'Remarks:';
-    remarksRow.appendChild(remarksLabelCell);
-
-    const remarksCell = document.createElement('td');
-    remarksCell.colSpan = 3;
-
-    const remarksDiv = document.createElement('div');
-    remarksDiv.className = 'col-span-3';
-
-    const formControlDiv = document.createElement('div');
-    formControlDiv.className = 'form-control1';
-
-    const remarksInput = document.createElement('input');
-    remarksInput.type = 'text';
-    remarksInput.name = `${item.uid}_remarks`;
-    remarksInput.placeholder = 'Enter remarks';
-    remarksInput.id = `${item.uid}_remarks`;
-    remarksInput.className = 'form-control1-input';
-
-    formControlDiv.appendChild(remarksInput);
-    remarksDiv.appendChild(formControlDiv);
-    remarksCell.appendChild(remarksDiv);
-    remarksRow.appendChild(remarksCell);
-
-    tableBody5.appendChild(remarksRow);
-
-  });
-
-  // New Code -Hemant
-function validateForm() { return validateFormArray(filteredData); }
-  function validateForm1() { return validateFormArray(cranetext); }
-  function validateForm2() { return validateFormArray(Forklifttext); }
-  function validateForm3() { return validateFormArray(Hottext); }
-  function validateForm4() { return validateFormArray(Heighttext); }
-  function validateForm5() { return validateFormArray(Annexuretext); }
-  function validateForm6() { return validateFormArray(Annexuretext1); }
-// End
-  // function validateForm() {
-  //   var isValid = true;
-  //   filteredData.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-  // function validateForm1() {
-  //   var isValid = true;
-  //   cranetext.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-
-  // function validateForm2() {
-  //   var isValid = true;
-  //   Forklifttext.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-  // function validateForm3() {
-  //   var isValid = true;
-  //   Hottext.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-  // function validateForm4() {
-  //   var isValid = true;
-  //   Heighttext.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-  // function validateForm5() {
-  //   var isValid = true;
-  //   Annexuretext.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-  // function validateForm6() {
-  //   var isValid = true;
-  //   Annexuretext1.forEach(function (item) {
-  //     var questionId = item.uid;
-  //     var input = document.getElementById(questionId);
-  //     if (!input.value.trim()) {
-  //       isValid = false;
-  //       return false;
-  //     }
-  //   });
-  //   return isValid;
-  // }
-
-// New code - Hemant
-function materialchecklistAnswered() { return validateChecksheet(materialchecklist); }
-  function cranechecksheetAnswered() { return validateChecksheet(cranechecksheet); }
-  function forkliftchecksheetAnswered() { return validateChecksheet(Forkliftchecksheet); }
-  function hotchecksheetAnswered() { return validateChecksheet(Hotchecksheet); }
-  function heightchecksheetAnswered() { return validateChecksheet(Heightchecksheet); }
-  function ConfinedchecksheetAnswered() { return validateChecksheet(Confinedchecksheet); }
-  // End
-
-  // function materialchecklistAnswered() {
-  //   let allQuestionsAnswered = true;
-  //   materialchecklist.forEach(item => {
-  //     const questionId = item.uid;
-  //     const doneCheckbox = document.getElementById(questionId);
-  //     const naCheckbox = document.getElementById(`${questionId}_NA`);
-
-  //     if (!doneCheckbox || !naCheckbox || (!doneCheckbox.checked && !naCheckbox.checked)) {
-  //       allQuestionsAnswered = false;
-  //     }
-  //   });
-  //   return allQuestionsAnswered;
-  // }
-
-
-  // function cranechecksheetAnswered() {
-  //   let allQuestionsAnswered = true;
-  //   cranechecksheet.forEach(item => {
-  //     const questionId = item.uid;
-  //     const doneCheckbox = document.getElementById(questionId);
-  //     const naCheckbox = document.getElementById(`${questionId}_NA`);
-  //     const ngCheckbox = document.getElementById(`${questionId}_NG`);
-
-  //     if (!doneCheckbox || !naCheckbox || !ngCheckbox || (!doneCheckbox.checked && !naCheckbox.checked && !ngCheckbox.checked)) {
-  //       allQuestionsAnswered = false;
-  //     }
-  //   });
-  //   return allQuestionsAnswered;
-  // }
-
-
-  // function forkliftchecksheetAnswered() {
-  //   let allQuestionsAnswered = true;
-  //   Forkliftchecksheet.forEach(item => {
-  //     const questionId = item.uid;
-  //     const doneCheckbox = document.getElementById(questionId);
-  //     const naCheckbox = document.getElementById(`${questionId}_NA`);
-  //     const ngCheckbox = document.getElementById(`${questionId}_NG`);
-
-  //     if (!doneCheckbox || !naCheckbox || !ngCheckbox || (!doneCheckbox.checked && !naCheckbox.checked && !ngCheckbox.checked)) {
-  //       allQuestionsAnswered = false;
-  //     }
-  //   });
-  //   return allQuestionsAnswered;
-  // }
-
-
-  // function hotchecksheetAnswered() {
-  //   let allQuestionsAnswered = true;
-  //   Hotchecksheet.forEach(item => {
-  //     const questionId = item.uid;
-  //     const doneCheckbox = document.getElementById(questionId);
-  //     const naCheckbox = document.getElementById(`${questionId}_NA`);
-  //     const textInput = document.getElementById(`${questionId}_text`);
-
-  //     if (item.qtype.includes("300290003")) {
-  //       if (!textInput || !textInput.value.trim()) {
-  //         allQuestionsAnswered = false;
-  //       }
-  //     } else {
-  //       if (!doneCheckbox || !naCheckbox || (!doneCheckbox.checked && !naCheckbox.checked)) {
-  //         allQuestionsAnswered = false;
-  //       }
-  //     }
-  //   });
-  //   return allQuestionsAnswered;
-  // }
-
-  // function heightchecksheetAnswered() {
-  //   let allQuestionsAnswered = true;
-  //   Heightchecksheet.forEach(item => {
-  //     const questionId = item.uid;
-  //     const doneCheckbox = document.getElementById(questionId);
-  //     const naCheckbox = document.getElementById(`${questionId}_NA`);
-
-  //     if (!doneCheckbox || !naCheckbox || (!doneCheckbox.checked && !naCheckbox.checked)) {
-  //       allQuestionsAnswered = false;
-  //     }
-  //   });
-  //   return allQuestionsAnswered;
-  // }
-
-
-  // function ConfinedchecksheetAnswered() {
-  //   let allQuestionsAnswered = true;
-  //   Confinedchecksheet.forEach(item => {
-  //     const questionId = item.uid;
-  //     const doneCheckbox = document.getElementById(questionId);
-  //     const naCheckbox = document.getElementById(`${questionId}_NA`);
-  //     const textInput = document.getElementById(`${questionId}_text`);
-
-  //     if (item.qtype.includes("300290003")) {
-  //       if (!textInput || !textInput.value.trim()) {
-  //         allQuestionsAnswered = false;
-  //       }
-  //     } else {
-  //       if (!doneCheckbox || !naCheckbox || (!doneCheckbox.checked && !naCheckbox.checked)) {
-  //         allQuestionsAnswered = false;
-  //       }
-  //     }
-  //   });
-  //   return allQuestionsAnswered;
-  // }
-
-  // function validateTable() {
-  //   var tableRows = document.querySelectorAll("#recordTable7 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if (inputs[j].type === "text" && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // function validateTable121() {
-  //   var tableRows = document.querySelectorAll("#recordTable121 tr");
-  //   var checkbox1 = document.getElementById('checkbox1');
-  //   var checkbox2 = document.getElementById('checkbox2');
-  //   var checkbox3 = document.getElementById('checkbox3');
-  //   var checkbox4 = document.getElementById('checkbox4');
-  //   var minRows
-
-  //   if (checkbox1.checked) {
-  //     var selectElement = document.querySelector('input[name="Material-No-of-Persons-Engaged"]');
-  //     var minRows = selectElement.value;
-
-
-  //   } else if (checkbox2.checked) {
-  //     var selectElement = document.querySelector('input[name="HOT-No-of-Persons-Engaged"]');
-  //     var minRows = selectElement.value;
-
-
-  //   } else if (checkbox3.checked) {
-  //     var selectElement = document.querySelector('input[name="HEIGHT-No-of-Persons-Engaged"]');
-  //     var minRows = selectElement.value;
-
-
-  //   } else if (checkbox4.checked) {
-  //     var selectElement = document.querySelector('input[name="CONFINED-No-of-Persons-Engaged"]');
-  //     var minRows = selectElement.value;
-  //   } else {
-  //     var minRows = 1;
-  //   }
-
-
-  //   if (tableRows.length <= minRows) {
-  //     return false;
-  //   }
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if (inputs[j].type === "text" && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // New code - Hemant
+    return _qdata[key];
+  }
+
+  // Convenience getters — preserve existing variable names used in Submit functions
+  function getFilteredData()       { return getQData('filteredData');    }
+  function getCranetext()          { return getQData('cranetext');        }
+  function getForklifttext()       { return getQData('Forklifttext');     }
+  function getHottext()            { return getQData('Hottext');          }
+  function getHeighttext()         { return getQData('Heighttext');       }
+  function getAnnexuretext()       { return getQData('Annexuretext');     }
+  function getAnnexuretext1()      { return getQData('Annexuretext1');    }
+  function getMaterialchecklist()  { return getQData('materialchecklist');   }
+  function getCranechecksheet()    { return getQData('cranechecksheet');     }
+  function getForkliftchecksheet() { return getQData('Forkliftchecksheet'); }
+  function getHotchecksheet()      { return getQData('Hotchecksheet');      }
+  function getHeightchecksheet()   { return getQData('Heightchecksheet');   }
+  function getConfinedchecksheet() { return getQData('Confinedchecksheet'); }
+
+  // Track which steps have been rendered
+  const renderedSteps = {};
+
+  // Step-level lazy render registry
+  const stepRenderers = {
+    2:  () => renderQuestions("#step2 .grid",  getFilteredData()),
+    4:  () => renderChecklist("dynamic-table",  getMaterialchecklist(),  [{ suffix: "", label: "Done" }, { suffix: extension2, label: "N/A" }]),
+    5:  () => renderQuestions("#step5 .grid",  getCranetext()),
+    6:  () => renderChecklist("dynamic-table1", getCranechecksheet(),    [{ suffix: "", label: "Done" }, { suffix: extension, label: "NG" }, { suffix: extension2, label: "NA" }], 4),
+    7:  () => renderQuestions("#step7 .grid",  getForklifttext()),
+    8:  () => renderChecklist("dynamic-table2", getForkliftchecksheet(), [{ suffix: "", label: "Done" }, { suffix: extension, label: "NG" }, { suffix: extension2, label: "NA" }], 4),
+    9:  () => renderQuestions("#step9 .grid",  getHottext()),
+    11: () => renderChecklist("dynamic-table3", getHotchecksheet(),      [{ suffix: "", label: "Done" }, { suffix: extension2, label: "NA" }]),
+    12: () => renderQuestions("#step12 .grid", getHeighttext()),
+    14: () => renderChecklist("dynamic-table4", getHeightchecksheet(),   [{ suffix: "", label: "Done" }, { suffix: extension2, label: "NA" }]),
+    15: () => renderChecklist("dynamic-table5", getConfinedchecksheet(), [{ suffix: "", label: "Yes" }, { suffix: extension2, label: "No" }], 3),
+    16: () => renderQuestions("#step16 .grid", getAnnexuretext()),
+    18: () => renderQuestions("#step18 .grid", getAnnexuretext1()),
+  };
+
+  function renderChecklist(tableBodyId, items, choices, remarksColSpan) {
+    const tableBody = document.getElementById(tableBodyId);
+    tableBody.innerHTML = '';
+
+    items.forEach(item => {
+      const row = document.createElement('tr');
+
+      const qNumberCell = document.createElement('td');
+      qNumberCell.textContent = item.Qnumber;
+      row.appendChild(qNumberCell);
+
+      const questionCell = document.createElement('td');
+      const questionParagraph = document.createElement('p');
+      questionParagraph.innerHTML = item.Question.replace(/\n/g, '<br>');
+      questionCell.appendChild(questionParagraph);
+      row.appendChild(questionCell);
+
+      if (item.qtype === '300290003') {
+        const textInputCell = document.createElement('td');
+        textInputCell.colSpan = 2;
+        const textInput = document.createElement('input');
+        textInput.type = 'text';
+        textInput.name = `${item.uid}_text`;
+        textInput.id = `${item.uid}_text`;
+        textInput.placeholder = 'Enter text';
+        textInput.className = 'form-control1-input';
+        textInputCell.appendChild(textInput);
+        row.appendChild(textInputCell);
+      } else {
+        choices.forEach(choice => {
+          const choiceCell = document.createElement('td');
+          const choiceSpan = document.createElement('span');
+          const choiceId = item.uid + choice.suffix;
+          choiceSpan.className = 'custom-checkbox';
+          choiceSpan.innerHTML = `<input type="radio" name="${item.uid}" id="${choiceId}" class="custom-checkbox-input" /><label for="${choiceId}" class="custom-checkbox-label">${choice.label}</label>`;
+          choiceCell.appendChild(choiceSpan);
+          row.appendChild(choiceCell);
+        });
+      }
+
+      tableBody.appendChild(row);
+
+      if (remarksColSpan) {
+        const remarksRow = document.createElement('tr');
+
+        const remarksLabelCell = document.createElement('td');
+        remarksLabelCell.textContent = 'Remarks:';
+        remarksRow.appendChild(remarksLabelCell);
+
+        const remarksCell = document.createElement('td');
+        remarksCell.colSpan = remarksColSpan;
+
+        const remarksDiv = document.createElement('div');
+        remarksDiv.className = 'col-span-3';
+
+        const formControlDiv = document.createElement('div');
+        formControlDiv.className = 'form-control1';
+
+        const remarksInput = document.createElement('input');
+        remarksInput.type = 'text';
+        remarksInput.name = `${item.uid}_remarks`;
+        remarksInput.placeholder = 'Enter remarks';
+        remarksInput.id = `${item.uid}_remarks`;
+        remarksInput.className = 'form-control1-input';
+
+        formControlDiv.appendChild(remarksInput);
+        remarksDiv.appendChild(formControlDiv);
+        remarksCell.appendChild(remarksDiv);
+        remarksRow.appendChild(remarksCell);
+
+        tableBody.appendChild(remarksRow);
+      }
+    });
+  }
+
+
+  // Validation wrappers — use getters so data is only computed when needed
+  function validateForm()  { return validateFormArray(getFilteredData()); }
+  function validateForm1() { return validateFormArray(getCranetext()); }
+  function validateForm2() { return validateFormArray(getForklifttext()); }
+  function validateForm3() { return validateFormArray(getHottext()); }
+  function validateForm4() { return validateFormArray(getHeighttext()); }
+  function validateForm5() { return validateFormArray(getAnnexuretext()); }
+  function validateForm6() { return validateFormArray(getAnnexuretext1()); }
+
+  function materialchecklistAnswered()  { return validateChecksheet(getMaterialchecklist()); }
+  function cranechecksheetAnswered()    { return validateChecksheet(getCranechecksheet()); }
+  function forkliftchecksheetAnswered() { return validateChecksheet(getForkliftchecksheet()); }
+  function hotchecksheetAnswered()      { return validateChecksheet(getHotchecksheet()); }
+  function heightchecksheetAnswered()   { return validateChecksheet(getHeightchecksheet()); }
+  function ConfinedchecksheetAnswered() { return validateChecksheet(getConfinedchecksheet()); }
 
   function validateTable121() {
     var tableRows = document.querySelectorAll("#recordTable121 tr");
@@ -3657,193 +2655,6 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
     return true;
   }
 
-  // end
-
-
-  // function validateTable1() {
-  //   var tableRows = document.querySelectorAll("#recordTable1 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if (inputs[j].type === "text" && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-
-  // function validateTable2() {
-  //   var tableRows = document.querySelectorAll("#recordTable2 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if (inputs[j].type === "text" && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // function validateTable3() {
-  //   var tableRows = document.querySelectorAll("#recordTable3 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if (inputs[j].type === "text" && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // function validateTable4() {
-  //   var tableRows = document.querySelectorAll("#recordTable4 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if (inputs[j].type === "text" && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // function validateTable5() {
-  //   var tableRows = document.querySelectorAll("#recordTable5 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file'], input[type='time']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if ((inputs[j].type === "text" || inputs[j].type === "time") && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // function validateTable6() {
-  //   var tableRows = document.querySelectorAll("#recordTable6 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file'], input[type='time']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if ((inputs[j].type === "text" || inputs[j].type === "time") && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // function validateTable131() {
-  //   var tableRows = document.querySelectorAll("#recordTable131 tr");
-
-  //   for (var i = 0; i < tableRows.length; i++) {
-  //     var inputs = tableRows[i].querySelectorAll("input[type='text'], input[type='file'], input[type='time']");
-  //     var isFilled = true;
-
-  //     for (var j = 0; j < inputs.length; j++) {
-  //       if ((inputs[j].type === "text" || inputs[j].type === "time") && inputs[j].value.trim() === "") {
-  //         isFilled = false;
-  //         break;
-  //       }
-  //       // else if (inputs[j].type === "file" && (inputs[j].files === null || inputs[j].files.length === 0)) {
-  //       //     isFilled = false;
-  //       //     break;
-  //       // }
-  //     }
-
-  //     if (!isFilled) {
-  //       return false;
-  //     }
-  //   }
-
-  //   return true;
-  // }
-
-  // New code - Hemant
   function validateTable() { return validateTableRows("#recordTable7", "input[type='text'], input[type='file']"); }
   function validateTable1() { return validateTableRows("#recordTable1", "input[type='text'], input[type='file']"); }
   function validateTable2() { return validateTableRows("#recordTable2", "input[type='text'], input[type='file']"); }
@@ -4687,12 +3498,33 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
   //   }
   // }
 
-  // new code - hemant
+  // Lazy-render + deferred geolocation
   function showStep(stepNumber, isBackwards = false) {
     var currentStep = getCurrentStep();
     if (currentStep && !isBackwards) {
       var currentStepNumber = parseInt(currentStep.id.replace("step", ""));
       stepHistory.push(currentStepNumber);
+    }
+
+    // Lazy render: only build DOM for this step the first time it is visited
+    if (!renderedSteps[stepNumber] && stepRenderers[stepNumber]) {
+      stepRenderers[stepNumber]();
+      renderedSteps[stepNumber] = true;
+
+      // After rendering Step 2 for the first time, wire up the MSDS toggle
+      // (element IDs from renderChecklist are now in DOM)
+      if (stepNumber === 4) {
+        var doneEl = document.getElementById("30808e53-c90d-ef11-9f89-000d3af27b93");
+        var naEl   = document.getElementById("30808e53-c90d-ef11-9f89-000d3af27b93_NA");
+        if (doneEl) doneEl.addEventListener("change", toggleField1);
+        if (naEl)   naEl.addEventListener("change",   toggleField1);
+      }
+    }
+
+    // Defer geolocation prompt to when the user actually reaches Step 21
+    if (stepNumber === 21 && !renderedSteps['geolocation']) {
+      getLocation();
+      renderedSteps['geolocation'] = true;
     }
 
     hideAllSteps();
@@ -4701,8 +3533,6 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
       step.style.display = 'block';
     }
   }
-
-  // end
   function hideAllSteps() {
     var steps = document.querySelectorAll('[id^="step"]');
     steps.forEach(function (step) {
@@ -4729,7 +3559,7 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
   //   }
   // });
 
-  let imageData1, imageData2, imageData3, imageData4, imageData5, imageData6, imageData7, imageData8, imageData9, imageData10, imageData11, imageData12, imageData13, imageData14, imageData15;
+  const imageDataArray = [];
 
   var base64Image;
   var stepHistory = [];
@@ -4743,81 +3573,26 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
     });
   });
 
+  // Compress then store — replaces raw FileReader for all image-upload inputs
   function handleFileSelect(event, inputIndex) {
-    const fileInput = event.target;
-    const file = fileInput.files[0];
+    const file = event.target.files[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      const dataURL = e.target.result;
-      const base64Data = dataURL.split(',')[1];
-
-      switch (inputIndex) {
-        case 1:
-          imageData1 = base64Data;
-          break;
-        case 2:
-          imageData2 = base64Data;
-          break;
-        case 3:
-          imageData3 = base64Data;
-          break;
-        case 4:
-          imageData4 = base64Data;
-          break;
-        case 5:
-          imageData5 = base64Data;
-          break;
-        case 6:
-          imageData6 = base64Data;
-          break;
-        case 7:
-          imageData7 = base64Data;
-          break;
-        case 8:
-          imageData8 = base64Data;
-          break;
-        case 9:
-          imageData9 = base64Data;
-          break;
-        case 10:
-          imageData10 = base64Data;
-          break;
-        case 11:
-          imageData11 = base64Data;
-          break;
-        case 12:
-          imageData12 = base64Data;
-          break;
-        case 13:
-          imageData13 = base64Data;
-          break;
-        case 14:
-          imageData14 = base64Data;
-          break;
-        case 15:
-          imageData15 = base64Data;
-          break;
-      }
-    }
-    reader.readAsDataURL(file);
+    compressImage(file).then(function (b64) {
+      imageDataArray[inputIndex] = b64;
+    });
   }
 
+  // Team photo on Step 23 (uploadimg13) — same path, separate variable
   function handleImageUpload11(event) {
     const file = event.target.files[0];
-    if (!file) {
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      const dataURL = e.target.result;
-      base64Image = dataURL.split(',')[1];
-    };
-    reader.readAsDataURL(file);
+    if (!file) return;
+    compressImage(file).then(function (b64) {
+      base64Image = b64;
+    });
   }
 
-  getLocation();
+  // getLocation() is now called lazily inside showStep(21) — not on page load.
+  // This prevents the browser permission prompt appearing before the user needs it.
 
   function getLocation() {
     if (navigator.geolocation) {
@@ -4861,13 +3636,13 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
     } else if (naCheckbox.checked) {
       Firemdsd = "N/A";
       document.getElementById('MDSD').style.display = 'none';
-      imageData15 = null;
+      imageDataArray[15] = null;
       document.getElementById('uploadimgmdsd').value = "";
     }
   }
 
-  document.getElementById("30808e53-c90d-ef11-9f89-000d3af27b93").addEventListener("change", toggleField1);
-  document.getElementById("30808e53-c90d-ef11-9f89-000d3af27b93_NA").addEventListener("change", toggleField1);
+  // toggleField1 listeners are now wired lazily inside showStep(4)
+  // after renderChecklist() has created these elements in the DOM.
   // var SketchofEmergencyName , SketchofEmergency
 
   // function extractPdfDetails(inputId, typeVariable, base64Variable, extensionVar) {
@@ -4898,89 +3673,98 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
 
 
 
+  // ============================================================
+  // BATCH SUBMIT HELPER
+  // Bundles N individual Dataverse POSTs into one HTTP call.
+  // Cuts 40+ round-trips down to 3-4 per submission.
+  // ============================================================
+  function batchPost(entityUrl, records) {
+    if (!records || records.length === 0) return Promise.resolve();
+
+    const batchId     = 'batch_'     + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const changesetId = 'changeset_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
+    let batchBody = `--${batchId}\r\nContent-Type: multipart/mixed; boundary=${changesetId}\r\n\r\n`;
+
+    records.forEach((rec, i) => {
+      batchBody += `--${changesetId}\r\n`;
+      batchBody += `Content-Type: application/http\r\n`;
+      batchBody += `Content-Transfer-Encoding: binary\r\n`;
+      batchBody += `Content-ID: ${i + 1}\r\n\r\n`;
+      batchBody += `POST ${entityUrl} HTTP/1.1\r\n`;
+      batchBody += `Content-Type: application/json\r\n\r\n`;
+      batchBody += JSON.stringify(rec) + `\r\n`;
+    });
+
+    batchBody += `--${changesetId}--\r\n--${batchId}--`;
+
+    return new Promise((resolve, reject) => {
+      webapi.safeAjax({
+        type: "POST",
+        contentType: `multipart/mixed; boundary=${batchId}`,
+        url: "/_api/$batch",
+        data: batchBody,
+        success: resolve,
+        error: function (xhr) {
+          console.error('Batch POST failed', entityUrl, xhr);
+          reject(xhr);
+        }
+      });
+    });
+  }
+
+  // ============================================================
+  // SUBMIT — validates then fires 1 POST + 2-4 batch calls
+  // ============================================================
   function Submit() {
-
-    // New code - Hemant
     var popupMsgElement = document.getElementById('popupMessage');
-    if (popupMsgElement) {
-        popupMsgElement.innerText = "Please fill in all required fields.";
-    }
+    if (popupMsgElement) popupMsgElement.innerText = "Please fill in all required fields.";
 
-    var IssuingSafetyCoord = document.getElementById("Issuing_Safety_Coordinator").value;
+    var IssuingSafetyCoord  = document.getElementById("Issuing_Safety_Coordinator").value;
     var RequiringSafetyCoord = document.getElementById("Requiring_Safety_Coordinator").value;
-    // End
     var checkboxs1 = document.getElementById('checkbox1');
     var checkboxs2 = document.getElementById('checkbox2');
     var checkboxs3 = document.getElementById('checkbox3');
     var checkboxs4 = document.getElementById('checkbox4');
-    var issuingstaffid1;
-    var issuedate;
-    var contname;
-    var selectElement;
-    var selectElement1;
-    var selectElement2;
+
+    var issuingstaffid1, issuedate, contname;
 
     if (checkboxs1.checked) {
-      selectElement = document.querySelector('input[name="Material-issuingstaffid"]');
-      issuingstaffid1 = selectElement.value;
-      selectElement1 = document.querySelector('input[name="Material-issuedate"]');
-      issuedate = selectElement1.value;
-      selectElement2 = document.querySelector('input[name="Material-contname"]');
-      contname = selectElement2.value;
+      issuingstaffid1 = (document.querySelector('input[name="Material-issuingstaffid"]') || {}).value;
+      issuedate       = (document.querySelector('input[name="Material-issuedate"]')      || {}).value;
+      contname        = (document.querySelector('input[name="Material-contname"]')        || {}).value;
     } else if (checkboxs2.checked) {
-      selectElement = document.querySelector('input[name="HOT-issuingstaffid"]');
-      issuingstaffid1 = selectElement.value;
-      selectElement1 = document.querySelector('input[name="HOT-issuedate"]');
-      issuedate = selectElement1.value;
-      selectElement2 = document.querySelector('input[name="HOT-contname"]');
-      contname = selectElement2.value;
+      issuingstaffid1 = (document.querySelector('input[name="HOT-issuingstaffid"]') || {}).value;
+      issuedate       = (document.querySelector('input[name="HOT-issuedate"]')       || {}).value;
+      contname        = (document.querySelector('input[name="HOT-contname"]')        || {}).value;
     } else if (checkboxs3.checked) {
-      selectElement = document.querySelector('input[name="HEIGHT-issuingstaffid"]');
-      issuingstaffid1 = selectElement.value;
-      selectElement1 = document.querySelector('input[name="HEIGHT-issuedate"]');
-      issuedate = selectElement1.value;
-      selectElement2 = document.querySelector('input[name="Height-contname"]');
-      contname = selectElement2.value;
+      issuingstaffid1 = (document.querySelector('input[name="HEIGHT-issuingstaffid"]') || {}).value;
+      issuedate       = (document.querySelector('input[name="HEIGHT-issuedate"]')       || {}).value;
+      contname        = (document.querySelector('input[name="Height-contname"]')         || {}).value;
     } else if (checkboxs4.checked) {
-      selectElement = document.querySelector('input[name="CONFINED-issuingstaffid"]');
-      issuingstaffid1 = selectElement.value;
-      selectElement1 = document.querySelector('input[name="CONFINED-issuedate"]');
-      issuedate = selectElement1.value;
+      issuingstaffid1 = (document.querySelector('input[name="CONFINED-issuingstaffid"]') || {}).value;
+      issuedate       = (document.querySelector('input[name="CONFINED-issuedate"]')       || {}).value;
     } else {
       issuingstaffid1 = document.getElementById("Issuing_person").value;
-      issuedate = new Date().toISOString().split('T')[0];
+      issuedate       = new Date().toISOString().split('T')[0];
     }
 
-    var aAttendee = document.getElementById("aAttendee");
-    var bAttendee = document.getElementById("bAttendee");
-    var cAttendee = document.getElementById("cAttendee");
-    var dAttendee = document.getElementById("dAttendee");
-    var eAttendee = document.getElementById("eAttendee");
-    var Approvaldate = document.getElementById("Approvaldate");
-    // var fileInput = document.getElementById("uploadimg13"); || fileInput.files.length <= 0
-    var fileInput1 = document.getElementById("uploadimgmdsd");
-    var table = document.getElementById("recordTable131");
-    var dropdown131 = document.getElementById("workplanned");
-    var fromdate = document.getElementById("permitfrom");
-    var todate = document.getElementById("permitto");
-    var reqdpm = document.getElementById("Reruiring_dpm");
-    var issdpm = document.getElementById("Issuing_dpm");
-    var Kylocation1 = document.getElementById('kylocation');
-    var Kylocationtext = document.getElementById('locationoth');
-    var shopdrp = document.getElementById('shop').value;
-    var shopoth = document.getElementById('shopoth').value;
+    var Approvaldate    = document.getElementById("Approvaldate");
+    var dropdown131     = document.getElementById("workplanned");
+    var table131        = document.getElementById("recordTable131");
+    var fromdate        = document.getElementById("permitfrom");
+    var todate          = document.getElementById("permitto");
+    var reqdpm          = document.getElementById("Reruiring_dpm");
+    var issdpm          = document.getElementById("Issuing_dpm");
+    var Kylocation1     = document.getElementById('kylocation');
+    var Kylocationtext  = document.getElementById('locationoth');
+    var shopdrp         = document.getElementById('shop').value;
+    var shopoth         = document.getElementById('shopoth').value;
 
-
-    // if (Approvaldate.value === '' || !validateTable121() || (fileInput1.files.length <= 0 && Firemdsd === "Done") || dropdown131.value === "--Select--" || (dropdown131.value === '300290000' && !validateTable131()) || (dropdown131.value === '300290000' && table.rows.length <= 0)) {
-    //   showPopup();
-    //   return;
-    // }
-
+    // Validation
     let isSubmitValid = true;
-
     if (!validateAndHighlight('Approvaldate')) isSubmitValid = false;
-
-    if (!validateAndHighlight('workplanned')) isSubmitValid = false;
+    if (!validateAndHighlight('workplanned'))  isSubmitValid = false;
 
     var teamPhotoInput = document.getElementById('uploadimg13');
     if (teamPhotoInput && teamPhotoInput.files.length <= 0) {
@@ -4998,83 +3782,59 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
       mdsdInput.style.removeProperty("border");
     }
 
-    var dropdown131 = document.getElementById("workplanned");
-    var table131 = document.getElementById("recordTable131");
     if (dropdown131 && dropdown131.value === '300290000') {
-      if (!validateTable131() || (table131 && table131.rows.length <= 1)) {
-        isSubmitValid = false;
-      }
+      if (!validateTable131() || (table131 && table131.rows.length <= 1)) isSubmitValid = false;
     }
+    if (!validateTable121()) isSubmitValid = false;
 
-    if (!validateTable121()) {
-      isSubmitValid = false; 
-    }
-
-    if (!isSubmitValid) {
-      showPopup();
-      return;
-    }
+    if (!isSubmitValid) { showPopup(); return; }
     freezeScreen();
 
-    var currentTime = new Date();
-    var hours = currentTime.getHours();
-    var minutes = currentTime.getMinutes();
-    var seconds = currentTime.getSeconds();
-    hours = (hours < 10 ? '0' : '') + hours;
-    minutes = (minutes < 10 ? '0' : '') + minutes;
-    seconds = (seconds < 10 ? '0' : '') + seconds;
-    var currentTimeString = hours + ':' + minutes + ':' + seconds;
+    var now = new Date();
+    var currentTimeString = [now.getHours(), now.getMinutes(), now.getSeconds()]
+      .map(n => String(n).padStart(2, '0')).join(':');
 
-
-    var TypeOfWork = document.getElementById('projectname_1');
+    var TypeOfWork    = document.getElementById('projectname_1');
     var permitrequired = document.getElementById('permitrequired_1');
-    var PermitID = document.getElementById('PermitID_1');
-    var checkbox1 = document.getElementById('checkbox1');
-    var checkbox2 = document.getElementById('checkbox2');
-    var checkbox3 = document.getElementById('checkbox3');
-    var checkbox4 = document.getElementById('checkbox4');
-    var selectElement = document.querySelector('select[name="a) Crane,b) Fork Lift,c) Both(a&b)"]');
-    var selectedValue = selectElement.value;
+    var PermitID      = document.getElementById('PermitID_1');
+    var checkbox1     = document.getElementById('checkbox1');
+    var checkbox2     = document.getElementById('checkbox2');
+    var checkbox3     = document.getElementById('checkbox3');
+    var checkbox4     = document.getElementById('checkbox4');
 
-    var record = {};
-    // New code - Hemant
-    record.sysmar_issuingdepartmentsafetycoordinator = IssuingSafetyCoord;
-    record.sysmar_requiringdepartmentsafetycoordinator = RequiringSafetyCoord;
-    // end
-    record.sysmar_typeofwork = TypeOfWork.value;
-    record.sysmar_permitidissued = permitrequired.value;
-    record.sysmar_permitid = PermitID.value;
-    record.sysmar_materialheight = checkbox1.checked;
-    record.sysmar_hotwork = checkbox2.checked;
-    record.sysmar_heightcivil = checkbox3.checked;
-    record.sysmar_confinedspace = checkbox4.checked;
-    record.sysmar_submittedtime = currentTimeString;
-    record.sysmar_isanyotherpartyinvolvedinthework = workplanned.value;
-    record.sysmar_issuingperson = issuingstaffid1;
-    record.sysmar_issuedate = issuedate;
-    record["sysmar_Shop@odata.bind"] = "/sysmar_kyshops(" + shopdrp + ")";
-    record.sysmar_shopothers = shopoth;
-    record.sysmar_useremail = "{{ user.emailaddress1 }}";
-    record.sysmar_username = "{{ user.fullname }}";
-    record["sysmar_KYUser@odata.bind"] = "/contacts({{ user.contactid }})";
-    record.sysmar_contractorsname = contname;
-    record.sysmar_kylocation = Kylocation1.value;
-    record.sysmar_locationothers = Kylocationtext.value;
+    var record = {
+      sysmar_issuingdepartmentsafetycoordinator:  IssuingSafetyCoord,
+      sysmar_requiringdepartmentsafetycoordinator: RequiringSafetyCoord,
+      sysmar_typeofwork:      TypeOfWork.value,
+      sysmar_permitidissued:  permitrequired.value,
+      sysmar_permitid:        PermitID.value,
+      sysmar_materialheight:  checkbox1.checked,
+      sysmar_hotwork:         checkbox2.checked,
+      sysmar_heightcivil:     checkbox3.checked,
+      sysmar_confinedspace:   checkbox4.checked,
+      sysmar_submittedtime:   currentTimeString,
+      sysmar_isanyotherpartyinvolvedinthework: dropdown131.value,
+      sysmar_issuingperson:   issuingstaffid1,
+      sysmar_issuedate:       issuedate,
+      "sysmar_Shop@odata.bind": "/sysmar_kyshops(" + shopdrp + ")",
+      sysmar_shopothers:      shopoth,
+      sysmar_useremail:       "{{ user.emailaddress1 }}",
+      sysmar_username:        "{{ user.fullname }}",
+      "sysmar_KYUser@odata.bind": "/contacts({{ user.contactid }})",
+      sysmar_contractorsname: contname,
+      sysmar_kylocation:      Kylocation1.value,
+      sysmar_locationothers:  Kylocationtext.value
+    };
 
     if (permitrequired.value === "300290000") {
       record.sysmar_permitisvalidfrom = fromdate.value;
       record.sysmar_permitisvalidtill = todate.value;
-
     } else if (permitrequired.value === "300290001") {
       record.sysmar_requiringdpm = reqdpm.value;
-      record.sysmar_issuingdpm = issdpm.value;
+      record.sysmar_issuingdpm   = issdpm.value;
     }
 
-    if (reqstaffid !== '') {
-      record.sysmar_requiringperson = "{{user.sysmar_staffid}}";
-    } else {
-      record.sysmar_requiringperson = flowreqtaffid;
-    }
+    record.sysmar_requiringperson = reqstaffid !== '' ? "{{user.sysmar_staffid}}" : flowreqtaffid;
 
     webapi.safeAjax({
       type: "POST",
@@ -5083,21 +3843,23 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
       data: JSON.stringify(record),
       success: function (data, textStatus, xhr) {
         var newId = xhr.getResponseHeader("entityid");
-        Submit2(newId);
+        Submit2(newId).catch(err => console.error("Submission error:", err));
       },
-      error: function (xhr, textStatus, errorThrown) {
-        console.log(xhr);
-      }
+      error: function (xhr) { console.log(xhr); }
     });
   }
 
+  // ============================================================
+  // SUBMIT2 — collects all checklist/table data and fires
+  // batched POSTs in parallel, then calls Submit3 for the PATCH.
+  // ============================================================
   async function Submit2(newId) {
     var checkbox1 = document.getElementById('checkbox1');
     var checkbox2 = document.getElementById('checkbox2');
     var checkbox3 = document.getElementById('checkbox3');
     var checkbox4 = document.getElementById('checkbox4');
     var selectElement = document.querySelector('select[name="a) Crane,b) Fork Lift,c) Both(a&b)"]');
-    var selectedValue = selectElement.value;
+    var selectedValue = selectElement ? selectElement.value : '';
     var dropdown131 = document.getElementById("workplanned");
 
     try {
@@ -5108,848 +3870,297 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
       }
       if (checkbox1.checked) {
         conditionalPromises.push(handleMaterialChecklist(newId));
-
-        if ((selectedValue === "a) Crane" || selectedValue === "c) Both(a&b)") && checkbox1.checked) {
+        if (selectedValue === "a) Crane" || selectedValue === "c) Both(a&b)") {
           conditionalPromises.push(handleAnotherChecklist(newId));
         }
-
-        if ((selectedValue === "b) Fork Lift" || selectedValue === "c) Both(a&b)") && checkbox1.checked) {
+        if (selectedValue === "b) Fork Lift" || selectedValue === "c) Both(a&b)") {
           conditionalPromises.push(handleYetAnotherChecklist(newId));
         }
       }
-      if (checkbox2.checked) {
-        conditionalPromises.push(handleHotWork(newId));
-      }
-      if (checkbox3.checked) {
-        conditionalPromises.push(handleHeightWork(newId));
-      }
-      if (checkbox4.checked) {
-        conditionalPromises.push(handleConfinedSpaceWork(newId));
-      }
+      if (checkbox2.checked) conditionalPromises.push(handleHotWork(newId));
+      if (checkbox3.checked) conditionalPromises.push(handleHeightWork(newId));
+      if (checkbox4.checked) conditionalPromises.push(handleConfinedSpaceWork(newId));
 
       conditionalPromises.push(tableslist(newId));
 
       await Promise.all(conditionalPromises);
-      console.log("All Conditional Steps Completed");
-
       await Submit3(newId);
-      console.log("Last API Call Completed");
 
     } catch (error) {
-      console.error("Error during submission:", error);
+      console.error("Submission error:", error);
     }
   }
 
+  // Use class selectors (.Name131, .StaffID131) so dynamic rows added
+  // Use class selectors so dynamic rows are found correctly — not just the first ID match.
   async function tableChecklist(newId) {
-    const dataArray = [];
+    const records = [];
     $('#recordTable131 tbody tr').each(function () {
-      const rowData = {
-        Name: $(this).find('#Name131').val(),
-        StaffID: $(this).find('#StaffID').val()
-      };
-      dataArray.push(rowData);
+      const name    = $(this).find('.Name131').val()   || $(this).find('input').eq(0).val();
+      const staffId = $(this).find('.StaffID131').val() || $(this).find('input').eq(1).val();
+      if (name || staffId) {
+        records.push({
+          "sysmar_KYID@odata.bind": "/sysmar_kyrequestforms(" + newId + ")",
+          sysmar_name:    name,
+          sysmar_staffid: staffId
+        });
+      }
     });
-
-    const validDataArray = dataArray.filter(function (row) {
-      return Object.values(row).some(function (value) {
-        return value !== undefined;
-      });
-    });
-
-    const promises = validDataArray.map(function (dataItem) {
-      const record2 = {
-        "sysmar_KYID@odata.bind": "/sysmar_kyrequestforms(" + newId + ")",
-        sysmar_name: dataItem.Name,
-        sysmar_staffid: dataItem.StaffID
-      };
-      return webapi.safeAjax({
-        type: "POST",
-        contentType: "application/json",
-        url: "/_api/sysmar_kyworkplanneds",
-        data: JSON.stringify(record2),
-      });
-    });
-    await Promise.all(promises);
-    console.log("table131 completed");
+    await batchPost("/_api/sysmar_kyworkplanneds", records);
   }
 
-  async function handleMaterialChecklist(newId) {
-    const records1 = filteredData.map(item => ({
-      "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-      "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${item.uid})`,
+  // ── Shared helpers ──────────────────────────────────────────
+  function makeAnswerRecord(newId, item, answer, remarks) {
+    const r = {
+      "sysmar_KYID@odata.bind":         `/sysmar_kyrequestforms(${newId})`,
+      "sysmar_QuestionID@odata.bind":   `/sysmar_kyquestionses(${item.uid})`,
       "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${item.checksheettype})`,
       sysmar_questionnumber: item.Qnumber,
-      sysmar_qnumber: item.Prenum,
-      sysmar_questions: item.Question,
-      sysmar_answers: document.getElementById(item.uid).value
+      sysmar_qnumber:        item.Prenum,
+      sysmar_questions:      item.Question,
+      sysmar_answers:        answer
+    };
+    if (remarks !== undefined) r.sysmar_remarks = remarks;
+    return r;
+  }
+
+  function getCheckboxAnswer3(uid) {
+    const done = document.getElementById(uid);
+    const na   = document.getElementById(uid + '_NA');
+    const ng   = document.getElementById(uid + '_NG');
+    if (done && done.checked) return "Done";
+    if (na   && na.checked)   return "N/A";
+    if (ng   && ng.checked)   return "NG";
+    return "";
+  }
+
+  function collectEquipmentRows(tableId, nameClass, machineClass, statusClass, newId, checksheetId) {
+    const rows = [];
+    $(`#${tableId} tbody tr`).each(function () {
+      const name    = $(this).find(`.${nameClass}`).val()    || $(this).find('input').eq(0).val();
+      const machine = $(this).find(`.${machineClass}`).val() || $(this).find('input').eq(1).val();
+      const status  = $(this).find(`.${statusClass}`).val()  || $(this).find('select').eq(0).val();
+      if (name || machine) {
+        rows.push({
+          "sysmar_KYID@odata.bind":          `/sysmar_kyrequestforms(${newId})`,
+          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
+          sysmar_nameofequipment:    name,
+          sysmar_machineequipmentid: machine,
+          sysmar_status:             status
+        });
+      }
+    });
+    return rows;
+  }
+
+  // ── handleMaterialChecklist ──────────────────────────────────
+  async function handleMaterialChecklist(newId) {
+    const fd = getFilteredData();
+    const mc = getMaterialchecklist();
+    const checksheetId = mc.length ? mc[0].checksheettype : (fd.length > 1 ? fd[1].checksheettype : '');
+
+    // Form questions + checklist answers in one batch each
+    const formRecords = fd.map(item =>
+      makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value)
+    );
+    const checkRecords = mc.map(item =>
+      makeAnswerRecord(newId, item,
+        document.getElementById(item.uid) && document.getElementById(item.uid).checked ? "Done"
+          : document.getElementById(item.uid + '_NA') && document.getElementById(item.uid + '_NA').checked ? "N/A" : "")
+    );
+    const equipRecords = collectEquipmentRows('recordTable1', 'materialequipment', 'materialequipmentid', 'materialstatus', newId, checksheetId);
+
+    await Promise.all([
+      batchPost("/_api/sysmar_kyanswerlineitemses", [...formRecords, ...checkRecords]),
+      batchPost("/_api/sysmar_kyequipments",        equipRecords)
+    ]);
+  }
+
+  // ── handleAnotherChecklist (Crane) ──────────────────────────
+  async function handleAnotherChecklist(newId) {
+    const ct = getCranetext();
+    const cc = getCranechecksheet();
+    const formRecords  = ct.map(item => makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value));
+    const checkRecords = cc.map(item => {
+      const remarks = (document.getElementById(item.uid + '_remarks') || {}).value || '';
+      return makeAnswerRecord(newId, item, getCheckboxAnswer3(item.uid), remarks.trim());
+    });
+    await batchPost("/_api/sysmar_kyanswerlineitemses", [...formRecords, ...checkRecords]);
+  }
+
+  // ── handleYetAnotherChecklist (Forklift) ────────────────────
+  function handleYetAnotherChecklist(newId) {
+    const ft = getForklifttext();
+    const fc = getForkliftchecksheet();
+    const formRecords  = ft.map(item => makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value));
+    const checkRecords = fc.map(item => {
+      const remarks = (document.getElementById(item.uid + '_remarks') || {}).value || '';
+      return makeAnswerRecord(newId, item, getCheckboxAnswer3(item.uid), remarks.trim());
+    });
+    return batchPost("/_api/sysmar_kyanswerlineitemses", [...formRecords, ...checkRecords]);
+  }
+
+  // ── handleHotWork ────────────────────────────────────────────
+  async function handleHotWork(newId) {
+    const ht = getHottext();
+    const hc = getHotchecksheet();
+    const checksheetId = hc.length ? hc[0].checksheettype : (ht.length > 1 ? ht[1].checksheettype : '');
+
+    const formRecords  = ht.map(item => makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value));
+    const checkRecords = hc.map(item => {
+      let answer;
+      if (item.qtype === '300290003') {
+        answer = ((document.getElementById(item.uid + '_text') || {}).value || '').trim();
+      } else {
+        const done = document.getElementById(item.uid);
+        const na   = document.getElementById(item.uid + '_NA');
+        answer = done && done.checked ? "Done" : na && na.checked ? "N/A" : "";
+      }
+      return makeAnswerRecord(newId, item, answer);
+    });
+    const equipRecords = collectEquipmentRows('recordTable2', 'materialequipment1', 'materialequipmentid1', 'materialstatus1', newId, checksheetId);
+
+    await Promise.all([
+      batchPost("/_api/sysmar_kyanswerlineitemses", [...formRecords, ...checkRecords]),
+      batchPost("/_api/sysmar_kyequipments",        equipRecords)
+    ]);
+  }
+
+  // ── handleHeightWork ─────────────────────────────────────────
+  async function handleHeightWork(newId) {
+    const ht = getHeighttext();
+    const hc = getHeightchecksheet();
+    const checksheetId = hc.length > 1 ? hc[1].checksheettype : (hc.length ? hc[0].checksheettype : '');
+
+    const formRecords  = ht.map(item => makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value));
+    const checkRecords = hc.map(item => {
+      const done = document.getElementById(item.uid);
+      const na   = document.getElementById(item.uid + '_NA');
+      return makeAnswerRecord(newId, item, done && done.checked ? "Done" : na && na.checked ? "N/A" : "");
+    });
+    const equipRecords = collectEquipmentRows('recordTable3', 'materialequipment2', 'materialequipmentid2', 'materialstatus2', newId, checksheetId);
+
+    await Promise.all([
+      batchPost("/_api/sysmar_kyanswerlineitemses", [...formRecords, ...checkRecords]),
+      batchPost("/_api/sysmar_kyequipments",        equipRecords)
+    ]);
+  }
+
+  // ── handleConfinedSpaceWork ──────────────────────────────────
+  async function handleConfinedSpaceWork(newId) {
+    const cc  = getConfinedchecksheet();
+    const at  = getAnnexuretext();
+    const at1 = getAnnexuretext1();
+    const checksheetId = cc.length > 1 ? cc[1].checksheettype : (cc.length ? cc[0].checksheettype : '');
+
+    const confinedRecords = cc.map(item => {
+      const answer = item.qtype === '300290003'
+        ? ((document.getElementById(item.uid + '_text') || {}).value || '').trim()
+        : document.getElementById(item.uid) && document.getElementById(item.uid).checked ? "Yes"
+          : document.getElementById(item.uid + '_NA') && document.getElementById(item.uid + '_NA').checked ? "No" : undefined;
+      const remarks = ((document.getElementById(item.uid + '_remarks') || {}).value || '').trim();
+      return makeAnswerRecord(newId, item, answer, remarks);
+    });
+    const annexure1Records = at.map(item  => makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value));
+    const annexure2Records = at1.map(item => makeAnswerRecord(newId, item, (document.getElementById(item.uid) || {}).value));
+
+    const equipRecords = collectEquipmentRows('recordTable4', 'materialequipment3', 'materialequipmentid3', 'materialstatus3', newId, checksheetId);
+
+    // Gas readings (recordTable5) — class-based selectors
+    const gasRecords = [];
+    $('#recordTable5 tbody tr').each(function () {
+      const Oxygen = $(this).find('.Oxygen').val() || $(this).find('input').eq(0).val();
+      const CO     = $(this).find('.CO_2').val()   || $(this).find('input').eq(1).val();
+      const H2S    = $(this).find('.H2S').val()    || $(this).find('input').eq(2).val();
+      const LEL    = $(this).find('.LEL').val()    || $(this).find('input').eq(3).val();
+      const VOC    = $(this).find('.VOC').val()    || $(this).find('input').eq(4).val();
+      const SO2    = $(this).find('.SO2').val()    || $(this).find('input').eq(5).val();
+      const time   = $(this).find('.time_1').val() || $(this).find('input[type="time"]').eq(0).val();
+      if (Oxygen || CO || H2S || LEL || VOC || SO2 || time) {
+        gasRecords.push({
+          "sysmar_KYID@odata.bind":          `/sysmar_kyrequestforms(${newId})`,
+          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
+          sysmar_oxygenvalue: Oxygen, sysmar_covalue: CO, sysmar_h2svalue: H2S,
+          sysmar_lelvalue: LEL, sysmar_vocvalue: VOC, sysmar_so2value: SO2, sysmar_time: time
+        });
+      }
+    });
+
+    await Promise.all([
+      batchPost("/_api/sysmar_kyanswerlineitemses", [...confinedRecords, ...annexure1Records, ...annexure2Records]),
+      batchPost("/_api/sysmar_kyequipments",        equipRecords),
+      batchPost("/_api/sysmar_kygases",             gasRecords)
+    ]);
+  }
+
+  // ── tableslist — attendance, attendees, identified risks ─────
+  // Uses class selectors for all dynamic-row tables.
+  // Risk images are compressed before encoding.
+  async function tableslist(newId) {
+    // Attendance (recordTable6)
+    const attendanceRecords = [];
+    $('#recordTable6 tbody tr').each(function () {
+      const name     = $(this).find('.Name_1').val()   || $(this).find('input').eq(0).val();
+      const staff    = $(this).find('.Staff_No').val()  || $(this).find('input').eq(1).val();
+      const timeIn   = $(this).find('.Time_In').val()   || $(this).find('input[type="time"]').eq(0).val();
+      const signIn   = $(this).find('.Sign_in').val()   || $(this).find('input').eq(3).val();
+      const timeOut  = $(this).find('.Time_Out').val()  || $(this).find('input[type="time"]').eq(1).val();
+      const signOut  = $(this).find('.Sign_Out').val()  || $(this).find('input').eq(5).val();
+      if (name || staff) {
+        attendanceRecords.push({
+          "sysmar_KYID@odata.bind":  "/sysmar_kyrequestforms(" + newId + ")",
+          sysmar_name:               name,
+          sysmar_staffid:            staff,
+          sysmar_timein:             timeIn,
+          sysmar_timeinsignature:    signIn,
+          sysmar_timeout:            timeOut,
+          sysmar_timeoutsignature:   signOut
+        });
+      }
+    });
+
+    // Attendees (recordTable121)
+    const attendeeRecords = [];
+    $('#recordTable121 tbody tr').each(function () {
+      const name = $(this).find('.Attendee121').val() || $(this).find('input').eq(0).val();
+      if (name) {
+        attendeeRecords.push({
+          "sysmar_KYID@odata.bind": "/sysmar_kyrequestforms(" + newId + ")",
+          sysmar_attendeename: name
+        });
+      }
+    });
+
+    // Identified risks (recordTable7) — compress images
+    const riskRowPromises = [];
+    $('#recordTable7 tbody tr').each(function () {
+      const identified = $(this).find('.sysmar_firstname').val() || $(this).find('input').eq(0).val();
+      const where      = $(this).find('.sysmar_surname').val()   || $(this).find('input').eq(1).val();
+      const what       = $(this).find('.sysmar_dob').val()       || $(this).find('input').eq(2).val();
+      const fileEl     = $(this).find('.uploadimga')[0];
+      const file       = fileEl && fileEl.files && fileEl.files[0];
+
+      const rowPromise = file
+        ? compressImage(file).then(img => ({ identified, where, what, img }))
+        : Promise.resolve({ identified, where, what, img: null });
+
+      riskRowPromises.push(rowPromise);
+    });
+
+    const riskRows = await Promise.all(riskRowPromises);
+    const riskRecords = riskRows.filter(r => r.identified || r.where || r.what).map(r => ({
+      "sysmar_KYID@odata.bind": "/sysmar_kyrequestforms(" + newId + ")",
+      sysmar_whatwillhappen: r.identified,
+      sysmar_wherehow:       r.where,
+      sysmar_whatwillbedone: r.what,
+      sysmar_uploadimage:    r.img
     }));
 
-    await Promise.all(
-      records1.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record),
-        })
-      )
-    );
-    console.log("Step2 Done");
-
-    const newId1 = filteredData[1].checksheettype;
-    const dataArray = Array.from($('#recordTable1 tbody tr')).map(row => ({
-      Name: $(row).find('#materialequipment').val(),
-      Machine: $(row).find('#materialequipmentid').val(),
-      Status: $(row).find('#materialstatus').val()
-    })).filter(row => Object.values(row).some(value => value !== undefined));
-
-    await Promise.all(
-      dataArray.map(dataItem => {
-        const record2 = {
-          "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${newId1})`,
-          sysmar_nameofequipment: dataItem.Name,
-          sysmar_machineequipmentid: dataItem.Machine,
-          sysmar_status: dataItem.Status
-        };
-        return webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyequipments",
-          data: JSON.stringify(record2),
-        });
-      })
-    );
-    console.log("Step3 Done");
-
-    const records3 = materialchecklist.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-
-      const doneCheckbox = document.getElementById(questionId);
-      const naCheckbox = document.getElementById(`${questionId}_NA`);
-
-      const answer = doneCheckbox.checked ? "Done" : naCheckbox.checked ? "N/A" : "";
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records3.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record),
-        })
-      )
-    );
-    console.log("Step4 Done");
-  }
-
-  async function handleAnotherChecklist(newId) {
-    const records1 = cranetext.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const input = document.getElementById(questionId);
-      const answer = input.value;
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    const record3Data = cranechecksheet.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      let answer;
-
-      const doneCheckbox = document.getElementById(questionId);
-      const naCheckbox = document.getElementById(`${questionId}_NA`);
-      const ngCheckbox = document.getElementById(`${questionId}_NG`);
-
-      if (doneCheckbox.checked) {
-        answer = "Done";
-      } else if (naCheckbox.checked) {
-        answer = "N/A";
-      } else if (ngCheckbox.checked) {
-        answer = "NG";
-      }
-
-      const remarksInput = document.getElementById(`${questionId}_remarks`);
-      const remarks = remarksInput.value.trim();
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer,
-        sysmar_remarks: remarks
-      };
-    });
-
-    const allPromises = [
-      ...records1.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record)
-        })
-      ),
-      ...record3Data.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record)
-        })
-      )
-    ];
-
-    await Promise.all(allPromises);
-    console.log("handleAnotherChecklist completed");
-  }
-
-  function handleYetAnotherChecklist(newId) {
-    const records1 = Forklifttext.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const input = document.getElementById(questionId);
-      const answer = input.value;
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    const records3 = Forkliftchecksheet.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const doneCheckbox = document.getElementById(questionId);
-      const naCheckbox = document.getElementById(`${questionId}_NA`);
-      const ngCheckbox = document.getElementById(`${questionId}_NG`);
-
-      let answer = "";
-      if (doneCheckbox.checked) {
-        answer = "Done";
-      } else if (naCheckbox.checked) {
-        answer = "N/A";
-      } else if (ngCheckbox.checked) {
-        answer = "NG";
-      }
-
-      const remarksInput = document.getElementById(`${questionId}_remarks`);
-      const remarks = remarksInput.value.trim();
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer,
-        sysmar_remarks: remarks
-      };
-    });
-
-    const allPromises = [
-      ...records1.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record)
-        })
-      ),
-      ...records3.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record)
-        })
-      )
-    ];
-
-    return Promise.all(allPromises);
-  }
-
-  async function handleHotWork(newId) {
-    const records1 = Hottext.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const input = document.getElementById(questionId);
-      const answer = input.value;
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records1.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record),
-          success: function () {
-            console.log("Step9 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-
-    const newId1 = Hottext[1].checksheettype;
-    const dataArray = $('#recordTable2 tbody tr').map(function () {
-      return {
-        Name: $(this).find('#materialequipment1').val(),
-        Machine: $(this).find('#materialequipmentid1').val(),
-        Status: $(this).find('#materialstatus1').val(),
-      };
-    }).get().filter(row => Object.values(row).some(value => value !== undefined));
-
-    await Promise.all(
-      dataArray.map(dataItem => {
-        const record2 = {
-          "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${newId1})`,
-          sysmar_nameofequipment: dataItem.Name,
-          sysmar_machineequipmentid: dataItem.Machine,
-          sysmar_status: dataItem.Status
-        };
-
-        return webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyequipments",
-          data: JSON.stringify(record2),
-          success: function (data, textStatus, xhr) {
-            const entityId = xhr.getResponseHeader("entityid");
-            console.log("Step10 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        });
-      })
-    );
-
-    const records3 = Hotchecksheet.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const doneCheckbox = document.getElementById(questionId);
-      const naCheckbox = document.getElementById(`${questionId}_NA`);
-      let answer;
-
-      if (item.qtype === '300290003') {
-        const textInput = document.getElementById(`${questionId}_text`);
-        answer = textInput.value.trim();
-      } else {
-        if (doneCheckbox.checked) {
-          answer = "Done";
-        } else if (naCheckbox.checked) {
-          answer = "N/A";
-        }
-      }
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records3.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record),
-          success: function () {
-            console.log("Step11 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-  }
-
-  async function handleHeightWork(newId) {
-    const records1 = Heighttext.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const input = document.getElementById(questionId);
-      const answer = input.value;
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records1.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record),
-          success: function () {
-            console.log("Step12 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-
-    const newId1 = Heightchecksheet[1].checksheettype;
-    const dataArray = $('#recordTable3 tbody tr').map(function () {
-      return {
-        Name: $(this).find('#materialequipment2').val(),
-        Machine: $(this).find('#materialequipmentid2').val(),
-        Status: $(this).find('#materialstatus2').val(),
-      };
-    }).get().filter(row => Object.values(row).some(value => value !== undefined));
-
-    await Promise.all(
-      dataArray.map(dataItem => {
-        const record2 = {
-          "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${newId1})`,
-          sysmar_nameofequipment: dataItem.Name,
-          sysmar_machineequipmentid: dataItem.Machine,
-          sysmar_status: dataItem.Status
-        };
-
-        return webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyequipments",
-          data: JSON.stringify(record2),
-          success: function () {
-            console.log("Step13 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        });
-      })
-    );
-
-    const records3 = Heightchecksheet.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const doneCheckbox = document.getElementById(questionId);
-      const naCheckbox = document.getElementById(`${questionId}_NA`);
-      let answer;
-
-      if (doneCheckbox.checked) {
-        answer = "Done";
-      } else if (naCheckbox.checked) {
-        answer = "N/A";
-      }
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records3.map(record =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record),
-          success: function () {
-            console.log("Step14 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-  }
-
-  async function handleConfinedSpaceWork(newId) {
-    const records3 = Confinedchecksheet.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const answer = item.qtype === '300290003'
-        ? document.getElementById(`${questionId}_text`).value.trim()
-        : document.getElementById(questionId).checked ? "Yes" : document.getElementById(`${questionId}_NA`).checked ? "No" : undefined;
-      const remarks = document.getElementById(`${questionId}_remarks`).value.trim();
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer,
-        sysmar_remarks: remarks
-      };
-    });
-
-    await Promise.all(
-      records3.map(record3 =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record3),
-          success: function () {
-            console.log("Step15 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-
-    const records1 = Annexuretext.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const answer = document.getElementById(questionId).value;
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records1.map(record1 =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record1),
-          success: function () {
-            console.log("Step16 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-
-    const records5 = Annexuretext1.map(item => {
-      const questionId = item.uid;
-      const checksheetId = item.checksheettype;
-      const answer = document.getElementById(questionId).value;
-
-      return {
-        "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-        "sysmar_QuestionID@odata.bind": `/sysmar_kyquestionses(${questionId})`,
-        "sysmar_CheckSheetType@odata.bind": `/sysmar_kychecksheettypes(${checksheetId})`,
-        sysmar_questionnumber: item.Qnumber,
-        sysmar_qnumber: item.Prenum,
-        sysmar_questions: item.Question,
-        sysmar_answers: answer
-      };
-    });
-
-    await Promise.all(
-      records5.map(record5 =>
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyanswerlineitemses",
-          data: JSON.stringify(record5),
-          success: function () {
-            console.log("Step17 Done");
-          },
-          error: function (xhr) {
-            console.log("Error:", xhr);
-          }
-        })
-      )
-    );
-
-    const newId1 = Confinedchecksheet[1].checksheettype;
-    const dataArray = $('#recordTable4 tbody tr').map(function () {
-      return {
-        Name: $(this).find('#materialequipment3').val(),
-        Machine: $(this).find('#materialequipmentid3').val(),
-        Status: $(this).find('#materialstatus3').val(),
-      };
-    }).get().filter(row => Object.values(row).some(value => value !== undefined));
-
-    await Promise.all(
-      dataArray.map(dataItem => {
-        const record2 = {
-          "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${newId1})`,
-          sysmar_nameofequipment: dataItem.Name,
-          sysmar_machineequipmentid: dataItem.Machine,
-          sysmar_status: dataItem.Status
-        };
-
-        return webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyequipments",
-          data: JSON.stringify(record2),
-          success: function () {
-            console.log("Step18 Done");
-          },
-          error: function (xhr) {
-            console.log(xhr);
-          }
-        });
-      })
-    );
-
-    const dataArray1 = $('#recordTable5 tbody tr').map(function () {
-      return {
-        Oxygen: $(this).find('#Oxygen').val(),
-        CO: $(this).find('#CO_2').val(),
-        H2S: $(this).find('#H2S').val(),
-        LEL: $(this).find('#LEL').val(),
-        VOC: $(this).find('#VOC').val(),
-        SO2: $(this).find('#SO2').val(),
-        time_1: $(this).find('#time_1').val()
-      };
-    }).get().filter(row => Object.values(row).some(value => value !== undefined));
-
-    await Promise.all(
-      dataArray1.map(dataItem => {
-        const record6 = {
-          "sysmar_KYID@odata.bind": `/sysmar_kyrequestforms(${newId})`,
-          "sysmar_CheckSheetName@odata.bind": `/sysmar_kychecksheettypes(${newId1})`,
-          sysmar_oxygenvalue: dataItem.Oxygen,
-          sysmar_covalue: dataItem.CO,
-          sysmar_h2svalue: dataItem.H2S,
-          sysmar_lelvalue: dataItem.LEL,
-          sysmar_vocvalue: dataItem.VOC,
-          sysmar_so2value: dataItem.SO2,
-          sysmar_time: dataItem.time_1
-        };
-
-        return webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kygases",
-          data: JSON.stringify(record6),
-          success: function () {
-            console.log("Step19 Done");
-          },
-          error: function (xhr) {
-            console.log(xhr);
-          }
-        });
-      })
-    );
-  }
-
-  async function tableslist(newId) {
-    var dataArray3 = [];
-    $('#recordTable6 tbody tr').each(function () {
-      var rowData3 = {
-        Name: $(this).find('#Name_1').val(),
-        Staff: $(this).find('#Staff_No').val(),
-        Time_In: $(this).find('#Time_In').val(),
-        Sign_in: $(this).find('#Sign_in').val(),
-        Time_Out: $(this).find('#Time_Out').val(),
-        Sign_Out: $(this).find('#Sign_Out').val()
-      };
-      dataArray3.push(rowData3);
-    });
-
-    dataArray3 = dataArray3.filter(function (row) {
-      return Object.values(row).some(function (value) {
-        return value !== undefined;
-      });
-    });
-
-    dataArray3.forEach(function (dataItem) {
-      var record6 = {};
-      record6["sysmar_KYID@odata.bind"] = "/sysmar_kyrequestforms(" + newId + ")";
-      record6.sysmar_name = dataItem.Name;
-      record6.sysmar_staffid = dataItem.Staff;
-      record6.sysmar_timein = dataItem.Time_In;
-      record6.sysmar_timeinsignature = dataItem.Sign_in;
-      record6.sysmar_timeout = dataItem.Time_Out;
-      record6.sysmar_timeoutsignature = dataItem.Sign_Out;
-
-      webapi.safeAjax({
-        type: "POST",
-        contentType: "application/json",
-        url: "/_api/sysmar_kyattendances",
-        data: JSON.stringify(record6),
-        success: function (data, textStatus, xhr) {
-          console.log("Step20 Done");
-        },
-        error: function (xhr, textStatus, errorThrown) {
-          console.log(xhr);
-        }
-      });
-    });
-
-    var dataArray121 = [];
-    $('#recordTable121 tbody tr').each(function () {
-      var rowData3 = {
-        Name: $(this).find('#Attendee121').val()
-      };
-      dataArray121.push(rowData3);
-    });
-
-    dataArray121 = dataArray121.filter(function (row) {
-      return Object.values(row).some(function (value) {
-        return value !== undefined;
-      });
-    });
-
-    dataArray121.forEach(function (dataItem) {
-      var record6 = {};
-      record6["sysmar_KYID@odata.bind"] = "/sysmar_kyrequestforms(" + newId + ")";
-      record6.sysmar_attendeename = dataItem.Name;
-
-      webapi.safeAjax({
-        type: "POST",
-        contentType: "application/json",
-        url: "/_api/sysmar_attendeetables",
-        data: JSON.stringify(record6),
-        success: function (data, textStatus, xhr) {
-          console.log("Step24 Done");
-        },
-        error: function (xhr, textStatus, errorThrown) {
-          console.log(xhr);
-        }
-      });
-    });
-
-    function getBase64(file, callback) {
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        const dataURL = e.target.result;
-        const base64Data = dataURL.split(',')[1];
-        callback(base64Data);
-      };
-      reader.onerror = function (error) {
-        console.error('Error occurred while converting image to base64:', error);
-      };
-
-      reader.readAsDataURL(file);
-    }
-
-    var dataArray4 = [];
-    var promises = [];
-
-    $('#recordTable7 tbody tr').each(function () {
-      var rowData4 = {
-        Identified: $(this).find('#sysmar_firstname').val(),
-        Where: $(this).find('#sysmar_surname').val(),
-        What: $(this).find('#sysmar_dob').val(),
-      };
-      var fileInput = $(this).find('#uploadimga');
-      if (fileInput.length > 0) {
-        var file = fileInput[0].files[0];
-        if (file) {
-          var promise = new Promise(function (resolve, reject) {
-            getBase64(file, function (base64Data) {
-              rowData4.img = base64Data;
-              dataArray4.push(rowData4);
-              resolve();
-            });
-          });
-          promises.push(promise);
-        } else {
-          dataArray4.push(rowData4);
-        }
-      }
-    });
-
-    Promise.all(promises).then(function () {
-      dataArray4.forEach(function (dataItem) {
-        var record7 = {};
-        record7["sysmar_KYID@odata.bind"] = "/sysmar_kyrequestforms(" + newId + ")";
-        record7.sysmar_whatwillhappen = dataItem.Identified;
-        record7.sysmar_wherehow = dataItem.Where;
-        record7.sysmar_whatwillbedone = dataItem.What;
-        record7.sysmar_uploadimage = dataItem.img;
-
-        webapi.safeAjax({
-          type: "POST",
-          contentType: "application/json",
-          url: "/_api/sysmar_kyidentifiedrisks",
-          data: JSON.stringify(record7),
-          success: function (data, textStatus, xhr) {
-            newId = xhr.getResponseHeader("entityid");
-            console.log("Step21 Done");
-          },
-          error: function (xhr, textStatus, errorThrown) {
-            console.log(xhr);
-          }
-        });
-      });
-    });
-
+    await Promise.all([
+      batchPost("/_api/sysmar_kyattendances",   attendanceRecords),
+      batchPost("/_api/sysmar_attendeetables",  attendeeRecords),
+      batchPost("/_api/sysmar_kyidentifiedrisks", riskRecords)
+    ]);
   }
 
 
@@ -6108,7 +4319,7 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
     record.sysmar_areaothers = areadrp; // Text
     // record["sysmar_Group@odata.bind"] = "/sysmar_kygroups("+ groupdrp +")";
     // record.sysmar_groupothers = groupoth; // Text
-    record.sysmar_locationimage = imageData2; // Image
+    record.sysmar_locationimage = imageDataArray[2]; // Image
     record.sysmar_activitydetails = activity; // Text
     record.sysmar_poweroff = checkbox211o.checked; // Boolean
     record.sysmar_removekeysafetyplugkeysafetyplug = checkbox212o.checked; // Boolean
@@ -6217,196 +4428,36 @@ function materialchecklistAnswered() { return validateChecksheet(materialcheckli
     // record.sysmar_cattendee = cAttendee; // Text
     // record.sysmar_dattendee = dAttendee; // Text
     // record.sysmar_eattendee = eAttendee; // Text
-    record.sysmar_approvaldate = Approvaldate; // Date Time
-    record.sysmar_electricshockuploadimage = imageData3; // Image
-    record.sysmar_fallinguploadimage = imageData4; // Image
-    record.sysmar_dropuploadimage = imageData5; // Text
-    record.sysmar_cutpinchuploadimage = imageData6; // Image
-    record.sysmar_slipuploadimage = imageData7; // Image
-    record.sysmar_tripoveruploadimage = imageData8; // Image
-    record.sysmar_sandwicheduploadimage = imageData9; // Image
-    record.sysmar_tohitbumpuploadimage = imageData10; // Image
-    record.sysmar_burnsandfiresuploadimage = imageData11; // Image
-    record.sysmar_dustparticlesuploadimage = imageData12; // Image
-    record.sysmar_backacheuploadimage = imageData13; // Image
-    record.sysmar_suffocationuploadimage = imageData14; // Image
-    record.sysmar_mdsdimage = imageData15;
-    record.sysmar_sketchofemergencyescaperouteandexit = imageData1;
-    record.sysmar_attendeeuploadimage = base64Image;
+    // Images — already compressed via compressImage() in handleFileSelect
+    record.sysmar_approvaldate = Approvaldate;
+    record.sysmar_electricshockuploadimage              = imageDataArray[3];
+    record.sysmar_fallinguploadimage                    = imageDataArray[4];
+    record.sysmar_dropuploadimage                       = imageDataArray[5];
+    record.sysmar_cutpinchuploadimage                   = imageDataArray[6];
+    record.sysmar_slipuploadimage                       = imageDataArray[7];
+    record.sysmar_tripoveruploadimage                   = imageDataArray[8];
+    record.sysmar_sandwicheduploadimage                 = imageDataArray[9];
+    record.sysmar_tohitbumpuploadimage                  = imageDataArray[10];
+    record.sysmar_burnsandfiresuploadimage              = imageDataArray[11];
+    record.sysmar_dustparticlesuploadimage              = imageDataArray[12];
+    record.sysmar_backacheuploadimage                   = imageDataArray[13];
+    record.sysmar_suffocationuploadimage                = imageDataArray[14];
+    record.sysmar_mdsdimage                             = imageDataArray[15];
+    record.sysmar_sketchofemergencyescaperouteandexit   = imageDataArray[1];
+    record.sysmar_attendeeuploadimage                   = base64Image;
 
-    webapi.safeAjax({
+    return webapi.safeAjax({
       type: "PATCH",
       contentType: "application/json",
       url: "/_api/sysmar_kyrequestforms(" + newId + ")",
       data: JSON.stringify(record),
-      success: function (data, textStatus, xhr) {
-        console.log("Record updated");
-        unfreezeScreen();
-        // FinalSubmit(newId);
-      },
-      error: function (xhr, textStatus, errorThrown) {
-        console.log(xhr);
-      }
+      success: function () { unfreezeScreen(); },
+      error: function (xhr) { console.log(xhr); }
     });
   }
 
-
-
-  // function FinalSubmit(newId){
-  //   var fileName = encodeURIComponent(SketchofEmergencyName);
-
-
-  // var base64Content = SketchofEmergency;
-  // var byteCharacters = atob(base64Content);
-  // var byteNumbers = new Array(byteCharacters.length);
-  // for (var i = 0; i < byteCharacters.length; i++) { byteNumbers[i] = byteCharacters.charCodeAt(i); }
-  // var fileContent = new Uint8Array(byteNumbers);
-
-  // webapi.safeAjax({
-  //     type: "PUT",
-  //     url: "/_api/sysmar_kyrequestforms(" + newId + ")/sysmar_sketchofemergencyescape",
-  //     contentType: "application/octet-stream",
-  //     data: fileContent,
-  //     processData: false,
-  //     beforeSend: function (xhr) {
-  //                                 xhr.setRequestHeader("x-ms-file-name", fileName);
-  //                             },
-  //     success: function (data, textStatus, xhr) {
-  //         console.log("File uploaded");
-  //         unfreezeScreen();
-  //     },
-  //     error: function (xhr, textStatus, errorThrown) {
-  //         console.log(xhr);
-  //     }
-  // });
-  // }
-
-
-  var materialSelectElement = document.querySelector('input[name="Material-issuingstaffid"]');
-  var hotSelectElement = document.querySelector('input[name="HOT-issuingstaffid"]');
-  var heightSelectElement = document.querySelector('input[name="HEIGHT-issuingstaffid"]');
-  var confinedselectElement = document.querySelector('input[name="CONFINED-issuingstaffid"]');
-
-  var materialSelectElement1 = document.querySelector('input[name="Material-issuingdept"]');
-  var hotSelectElement1 = document.querySelector('input[name="HOT-issuingdept"]');
-  var heightSelectElement1 = document.querySelector('input[name="HEIGHT-issunigdept"]');
-  var confinedselectElement1 = document.querySelector('input[name="CONFINED-issunigdept"]');
-
-  function handleChange1() {
-
-    var settings = {
-      // department flow
-      //"url": "https://prod-23.centralindia.logic.azure.com:443/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=O3KrDsoxvnqK-ziRApKEl4DApv2tf7rWbb54LKZBILs",
-      "url": "https://eadb1b2afd7145dc8d5a77e908bc0d.1b.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DPH5h7beyrdiMmL6e4KahaPzCSkc0n2KMAA6g6aVzIw",
-      "method": "POST",
-      "timeout": 0,
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "data": JSON.stringify({
-        "StaffID": materialSelectElement.value
-      }),
-    };
-
-    $.ajax(settings).done(function (response) {
-      console.log(response);
-      var dept = response[0];
-      if (materialSelectElement1.value.toLowerCase() !== dept.toLowerCase()) {
-        materialSelectElement.value = '';
-      }
-    });
-
-  }
-
-  function handleChange2() {
-    var settings = {
-      // department flow
-      //"url": "https://prod-23.centralindia.logic.azure.com:443/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=O3KrDsoxvnqK-ziRApKEl4DApv2tf7rWbb54LKZBILs",
-      "url": "https://eadb1b2afd7145dc8d5a77e908bc0d.1b.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DPH5h7beyrdiMmL6e4KahaPzCSkc0n2KMAA6g6aVzIw",
-      "method": "POST",
-      "timeout": 0,
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "data": JSON.stringify({
-        "StaffID": hotSelectElement.value
-      }),
-    };
-
-    $.ajax(settings).done(function (response) {
-      console.log(response);
-      var dept = response[0];
-      if (hotSelectElement1.value.toLowerCase() !== dept.toLowerCase()) {
-        hotSelectElement.value = '';
-      }
-    });
-
-
-  }
-
-
-  function handleChange3() {
-
-
-    var settings = {
-      // department flow
-      //"url": "https://prod-23.centralindia.logic.azure.com:443/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=O3KrDsoxvnqK-ziRApKEl4DApv2tf7rWbb54LKZBILs",
-      "url": "https://eadb1b2afd7145dc8d5a77e908bc0d.1b.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DPH5h7beyrdiMmL6e4KahaPzCSkc0n2KMAA6g6aVzIw",
-      "method": "POST",
-      "timeout": 0,
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "data": JSON.stringify({
-        "StaffID": heightSelectElement.value
-      }),
-    };
-
-    $.ajax(settings).done(function (response) {
-      console.log(response);
-      var dept = response[0];
-      if (heightSelectElement1.value.toLowerCase() !== dept.toLowerCase()) {
-        heightSelectElement.value = '';
-      }
-    });
-
-
-  }
-
-
-  function handleChange4() {
-
-
-    var settings = {
-      // department flow
-      //"url": "https://prod-23.centralindia.logic.azure.com:443/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=O3KrDsoxvnqK-ziRApKEl4DApv2tf7rWbb54LKZBILs",
-      "url": "https://eadb1b2afd7145dc8d5a77e908bc0d.1b.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/76fafe2724da4b2ebaf6b62e730ae7ea/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=DPH5h7beyrdiMmL6e4KahaPzCSkc0n2KMAA6g6aVzIw",
-      "method": "POST",
-      "timeout": 0,
-      "headers": {
-        "Content-Type": "application/json"
-      },
-      "data": JSON.stringify({
-        "StaffID": confinedselectElement.value
-      }),
-    };
-
-    $.ajax(settings).done(function (response) {
-      console.log(response);
-      var dept = response[0];
-      if (confinedselectElement1.value.toLowerCase() !== dept.toLowerCase()) {
-        confinedselectElement.value = '';
-      }
-    });
-
-
-  }
-
-
-  materialSelectElement.addEventListener('change', handleChange1);
-  hotSelectElement.addEventListener('change', handleChange2);
-  heightSelectElement.addEventListener('change', handleChange3);
-  confinedselectElement.addEventListener('change', handleChange4);
+  // validateDepartmentStaff is now handled by the debounced/cached
+  // staff ID validation above (consolidated with all staff ID listeners)
 
   // New code - Hemant for validation
 
